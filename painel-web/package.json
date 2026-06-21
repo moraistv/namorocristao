@@ -1,0 +1,31 @@
+{
+  "name": "namoro-cristao-painel",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tabler/core": "^1.4.0",
+    "@tabler/icons-react": "^3.44.0",
+    "apexcharts": "^5.15.0",
+    "lucide-react": "^1.20.0",
+    "react": "^18.3.1",
+    "react-apexcharts": "^2.1.0",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0",
+    "react-simple-maps": "^3.0.0",
+    "recharts": "^3.8.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@types/react-simple-maps": "^3.0.6",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  }
+}

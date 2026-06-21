@@ -1,0 +1,221 @@
+Launching lib\main.dart on SM S911B in debug mode...
+Running Gradle task 'assembleDebug'...                          
+[namespace-patch] record -> com.llfbandit.record
+Running Gradle task 'assembleDebug'...                             86,7s
+ÔêÜ Built build\app\outputs\flutter-apk\app-debug.apk
+Installing build\app\outputs\flutter-apk\app-debug.apk...           8,2s
+I/flutter (23052): [IMPORTANT:flutter/shell/platform/android/android_context_vk_impeller.cc(60)] Using the Impeller rendering backend (Vulkan).
+D/FlutterGeolocator(23052): Attaching Geolocator to activity
+D/FlutterGeolocator(23052): Creating service.
+D/FlutterGeolocator(23052): Binding to location service.
+D/FlutterLocationService(23052): Creating service.
+D/FlutterLocationService(23052): Binding to location service.
+D/FlutterGeolocator(23052): Geolocator foreground service connected
+D/FlutterGeolocator(23052): Initializing Geolocator services
+D/FlutterGeolocator(23052): Flutter engine connected. Connected engine count 1
+Syncing files to device SM S911B...                                209ms
+
+Flutter run key commands.
+r Hot reload. 
+R Hot restart.
+h List all available interactive commands.
+d Detach (terminate "flutter run" but leave application running).
+c Clear the screen
+q Quit (terminate the application on the device).
+
+A Dart VM Service on SM S911B is available at: http://127.0.0.1:53413/vT-vqHbMvS4=/
+The Flutter DevTools debugger and profiler on SM S911B is available at: http://127.0.0.1:9100?uri=http://127.0.0.1:53413/vT-vqHbMvS4=/
+W/WindowOnBackDispatcher(23052): OnBackInvokedCallback is not enabled for the application.
+W/WindowOnBackDispatcher(23052): Set 'android:enableOnBackInvokedCallback="true"' in the application manifest.
+D/ProfileInstaller(23052): Installing profile for com.winup.namoro
+I/VRI[MainActivity]@21f6aa3(23052): call setFrameRateCategory for touch hint category=high hint, reason=touch, vri=VRI[MainActivity]@21f6aa3
+I/VRI[MainActivity]@21f6aa3(23052): call setFrameRateCategory for touch hint category=no preference, reason=boost timeout, vri=VRI[MainActivity]@21f6aa3
+I/VRI[MainActivity]@21f6aa3(23052): call setFrameRateCategory for touch hint category=high hint, reason=touch, vri=VRI[MainActivity]@21f6aa3
+E/com.facebook.GraphResponse(23052): {HttpStatus: 400, errorCode: 100, subErrorCode: 33, errorType: GraphMethodException, errorMessage: Unsupported post request. Object with ID 'appID' does not exist, cannot be loaded due to missing permissions, or does not support this operation. Please read the Graph API documentation at https://developers.facebook.com/docs/graph-api}
+E/com.facebook.GraphResponse(23052): {HttpStatus: 400, errorCode: 190, subErrorCode: -1, errorType: OAuthException, errorMessage: Error validating application. Invalid application ID.}
+I/VRI[MainActivity]@21f6aa3(23052): call setFrameRateCategory for touch hint category=no preference, reason=boost timeout, vri=VRI[MainActivity]@21f6aa3
+I/VRI[MainActivity]@21f6aa3(23052): call setFrameRateCategory for touch hint category=high hint, reason=touch, vri=VRI[MainActivity]@21f6aa3
+I/VRI[MainActivity]@21f6aa3(23052): call setFrameRateCategory for touch hint category=no preference, reason=boost timeout, vri=VRI[MainActivity]@21f6aa3
+I/ImeFocusController(23052): onPreWindowFocus: skipped hasWindowFocus=false mHasImeFocus=true
+I/ImeFocusController(23052): onPostWindowFocus: skipped hasWindowFocus=false mHasImeFocus=true
+D/InputTransport(23052): Input channel destroyed: 'ClientS', fd=199
+I/VRI[MainActivity]@21f6aa3(23052): handleAppVisibility mAppVisible = true visible = false
+D/VRI[MainActivity]@21f6aa3(23052): visibilityChanged oldVisibility=true newVisibility=false
+I/SV[50299702 MainActivity](23052): onWindowVisibilityChanged(8) false io.flutter.embedding.android.FlutterSurfaceView{2ff8336 V.E...... ........ 0,0-1080,2298} of VRI[MainActivity]@21f6aa3
+I/SurfaceView(23052): 50299702 Changes: creating=false format=false size=false visible=true alpha=false hint=false left=false top=false z=false attached=true lifecycleStrategy=false
+I/SurfaceView(23052): 50299702 Cur surface: Surface(name=null mNativeObject=-5476376638805069568)/@0x9e3d285
+I/SurfaceView(23052): 50299702 surfaceDestroyed
+I/SV[50299702 MainActivity](23052): surfaceDestroyed callback.size 1 #2 io.flutter.embedding.android.FlutterSurfaceView{2ff8336 V.E...... ........ 0,0-1080,2298}
+I/SV[50299702 MainActivity](23052): updateSurface: mVisible = false mSurface.isValid() = true
+I/SV[50299702 MainActivity](23052): releaseSurfaces: viewRoot = VRI[MainActivity]@21f6aa3
+V/SurfaceView(23052): Layout: x=0 y=0 w=1080 h=2298, frame=Rect(0, 0 - 1080, 2298)
+D/SurfaceView(23052): 58583222 windowPositionLost, frameNr = 0
+D/HWUI    (23052): CacheManager::trimMemory(20)
+I/VRI[MainActivity]@21f6aa3(23052): Relayout returned: old=(0,0,1080,2340) new=(0,0,1080,2340) relayoutAsync=false req=(1080,2340)8 dur=13 res=0x2 s={false 0x0} ch=true seqId=0
+I/SV[50299702 MainActivity](23052): windowStopped(true) false io.flutter.embedding.android.FlutterSurfaceView{2ff8336 V.E...... ........ 0,0-1080,2298} of VRI[MainActivity]@21f6aa3
+D/SV[50299702 MainActivity](23052): updateSurface: surface is not valid
+I/SV[50299702 MainActivity](23052): releaseSurfaces: viewRoot = VRI[MainActivity]@21f6aa3
+D/VRI[MainActivity]@21f6aa3(23052): applyTransactionOnDraw applyImmediately
+D/SV[50299702 MainActivity](23052): updateSurface: surface is not valid
+I/SV[50299702 MainActivity](23052): releaseSurfaces: viewRoot = VRI[MainActivity]@21f6aa3
+D/VRI[MainActivity]@21f6aa3(23052): applyTransactionOnDraw applyImmediately
+D/VRI[MainActivity]@21f6aa3(23052): Not drawing due to not visible. Reason=!mAppVisible && !mForceDecorViewVisibility
+D/VRI[MainActivity]@21f6aa3(23052): Pending transaction will not be applied in sync with a draw due to view not visible
+I/VRI[MainActivity]@21f6aa3(23052): mWNT: t=0xb40000774428e400 mBlastBufferQueue=0xnull fn= 0 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.ViewRootImpl.handleSyncRequestWhenNoAsyncDraw:6812 android.view.ViewRootImpl.performTraversals:5568 android.view.ViewRootImpl.doTraversal:3959 
+D/HWUI    (23052): CacheManager::trimMemory(20)
+I/VRI[MainActivity]@21f6aa3(23052): stopped(true) old = false
+D/VRI[MainActivity]@21f6aa3(23052): WindowStopped on com.winup.namoro/com.winup.namoro.MainActivity set to true
+D/HWUI    (23052): CacheManager::trimMemory(20)
+D/SV[50299702 MainActivity](23052): updateSurface: surface is not valid
+I/SV[50299702 MainActivity](23052): releaseSurfaces: viewRoot = VRI[MainActivity]@21f6aa3
+D/VRI[MainActivity]@21f6aa3(23052): applyTransactionOnDraw applyImmediately
+D/SV[50299702 MainActivity](23052): updateSurface: surface is not valid
+I/SV[50299702 MainActivity](23052): releaseSurfaces: viewRoot = VRI[MainActivity]@21f6aa3
+D/VRI[MainActivity]@21f6aa3(23052): applyTransactionOnDraw applyImmediately
+D/BBA2    (23052): setIsFg isFg = false; delayValue 3999ms
+D/Choreographer(23052): BBA2 receive callback when in bg : 4
+D/HWUI    (23052): CacheManager::trimMemory(40)
+I/VRI[MainActivity]@21f6aa3(23052): handleAppVisibility mAppVisible = false visible = true
+I/VRI[MainActivity]@21f6aa3(23052): stopped(false) old = true
+D/VRI[MainActivity]@21f6aa3(23052): WindowStopped on com.winup.namoro/com.winup.namoro.MainActivity set to false
+D/ViewRootImpl(23052): Skipping stats log for color mode
+I/AdrenoGLES-0(23052): QUALCOMM build                   : 3df4c357f0, I515341007c
+I/AdrenoGLES-0(23052): Build Date                       : 01/27/26
+I/AdrenoGLES-0(23052): OpenGL ES Shader Compiler Version: E031.41.03.64
+I/AdrenoGLES-0(23052): Local Branch                     : 
+I/AdrenoGLES-0(23052): Remote Branch                    : refs/tags/AU_LINUX_ANDROID_LA.VENDOR.13.2.0.11.00.00.856.062
+I/AdrenoGLES-0(23052): Remote Branch                    : NONE
+I/AdrenoGLES-0(23052): Reconstruct Branch               : NOTHING
+I/AdrenoGLES-0(23052): Build Config                     : S P 14.1.4 AArch64
+I/AdrenoGLES-0(23052): Driver Path                      : /vendor/lib64/egl/libGLESv2_adreno.so
+I/AdrenoGLES-0(23052): Driver Version                   : 0676.77.1
+D/SV[50299702 MainActivity](23052): updateSurface: surface is not valid
+I/SV[50299702 MainActivity](23052): releaseSurfaces: viewRoot = VRI[MainActivity]@21f6aa3
+D/VRI[MainActivity]@21f6aa3(23052): applyTransactionOnDraw applyImmediately
+I/AdrenoGLES-0(23052): PFP: 0x01740181, ME: 0x00000000
+W/Adreno-AppProfiles(23052): Could not find QSPM HAL service. Skipping adreno profile processing.
+I/SV[50299702 MainActivity](23052): onWindowVisibilityChanged(0) false io.flutter.embedding.android.FlutterSurfaceView{2ff8336 V.E...... ......ID 0,0-1080,2298} of VRI[MainActivity]@21f6aa3
+D/SV[50299702 MainActivity](23052): updateSurface: surface is not valid
+I/SV[50299702 MainActivity](23052): releaseSurfaces: viewRoot = VRI[MainActivity]@21f6aa3
+D/VRI[MainActivity]@21f6aa3(23052): applyTransactionOnDraw applyImmediately
+W/libc    (23052): Access denied finding property "vendor.display.enable_optimal_refresh_rate"
+I/BufferQueueProducer(23052): [](id:5a0c00000002,api:0,p:1265562784,c:23052) setDequeueTimeout:2077252342
+I/BLASTBufferQueue_Java(23052): new BLASTBufferQueue, mName= VRI[MainActivity]@21f6aa3 mNativeObject= 0xb40000764b6db800 caller= android.view.ViewRootImpl.updateBlastSurfaceIfNeeded:3603 android.view.ViewRootImpl.relayoutWindow:11813 android.view.ViewRootImpl.performTraversals:4840 android.view.ViewRootImpl.doTraversal:3959 android.view.ViewRootImpl$TraversalRunnable.run:13034 android.view.Choreographer$CallbackRecord.run:1961 android.view.Choreographer$CallbackRecord.run:1970 android.view.Choreographer.doCallbacks:1423 android.view.Choreographer.doFrame:1348 android.view.Choreographer$FrameDisplayEventReceiver.run:1930 
+I/BLASTBufferQueue_Java(23052): update, w= 1080 h= 2340 mName = VRI[MainActivity]@21f6aa3 mNativeObject= 0xb40000764b6db800 sc.mNativeObject= 0xb4000077a6fc5700 format= -3 caller= android.view.ViewRootImpl.updateBlastSurfaceIfNeeded:3608 android.view.ViewRootImpl.relayoutWindow:11813 android.view.ViewRootImpl.performTraversals:4840 android.view.ViewRootImpl.doTraversal:3959 android.view.ViewRootImpl$TraversalRunnable.run:13034 android.view.Choreographer$CallbackRecord.run:1961 
+W/libc    (23052): Access denied finding property "vendor.display.enable_optimal_refresh_rate"
+I/VRI[MainActivity]@21f6aa3(23052): Relayout returned: old=(0,0,1080,2340) new=(0,0,1080,2340) relayoutAsync=false req=(1080,2340)0 dur=7 res=0x3 s={true 0xb40000764bc68900} ch=true seqId=0
+D/VRI[MainActivity]@21f6aa3(23052): mThreadedRenderer.initialize() mSurface={isValid=true 0xb40000764bc68900} hwInitialized=true
+I/SurfaceView(23052): 50299702 Changes: creating=false format=false size=false visible=false alpha=false hint=false left=false top=false z=false attached=true lifecycleStrategy=false
+I/SV[50299702 MainActivity](23052): windowStopped(false) true io.flutter.embedding.android.FlutterSurfaceView{2ff8336 V.E...... ......ID 0,0-1080,2298} of VRI[MainActivity]@21f6aa3
+I/SurfaceView(23052): 50299702 Changes: creating=true format=false size=false visible=true alpha=false hint=false left=false top=false z=false attached=true lifecycleStrategy=false
+W/libc    (23052): Access denied finding property "vendor.display.enable_optimal_refresh_rate"
+I/BufferQueueProducer(23052): [](id:5a0c00000003,api:0,p:0,c:23052) setDequeueTimeout:2077252342
+I/BLASTBufferQueue_Java(23052): new BLASTBufferQueue, mName= 2ff8336 SurfaceView[com.winup.namoro/com.winup.namoro.MainActivity]@0 mNativeObject= 0xb40000774455a800 caller= android.view.SurfaceView.createBlastSurfaceControls:1878 android.view.SurfaceView.updateSurface:1519 android.view.SurfaceView.setWindowStopped:542 android.view.SurfaceView.surfaceCreated:2429 android.view.ViewRootImpl.notifySurfaceCreated:3520 android.view.ViewRootImpl.performTraversals:5350 android.view.ViewRootImpl.doTraversal:3959 android.view.ViewRootImpl$TraversalRunnable.run:13034 android.view.Choreographer$CallbackRecord.run:1961 android.view.Choreographer$CallbackRecord.run:1970 
+I/BLASTBufferQueue_Java(23052): update, w= 1080 h= 2298 mName = 2ff8336 SurfaceView[com.winup.namoro/com.winup.namoro.MainActivity]@0 mNativeObject= 0xb40000774455a800 sc.mNativeObject= 0xb4000077a6fc5580 format= 4 caller= android.view.SurfaceView.createBlastSurfaceControls:1879 android.view.SurfaceView.updateSurface:1519 android.view.SurfaceView.setWindowStopped:542 android.view.SurfaceView.surfaceCreated:2429 android.view.ViewRootImpl.notifySurfaceCreated:3520 android.view.ViewRootImpl.performTraversals:5350 
+I/SurfaceView(23052): 50299702 Cur surface: Surface(name=null mNativeObject=0)/@0x9e3d285
+I/SV[50299702 MainActivity](23052): pST: sr = Rect(0, 0 - 1080, 2298) sw = 1080 sh = 2298
+D/SurfaceView(23052): 50299702 performSurfaceTransaction RenderWorker position = [0, 0, 1080, 2298] surfaceSize = 1080x2298
+W/libc    (23052): Access denied finding property "vendor.display.enable_optimal_refresh_rate"
+I/SV[50299702 MainActivity](23052): updateSurface: mVisible = true mSurface.isValid() = true
+I/SV[50299702 MainActivity](23052): updateSurface: mSurfaceCreated = false surfaceChanged = true visibleChanged = true
+I/SurfaceView(23052): 50299702 visibleChanged -- surfaceCreated
+I/SV[50299702 MainActivity](23052): surfaceCreated 1 #1 io.flutter.embedding.android.FlutterSurfaceView{2ff8336 V.E...... ......ID 0,0-1080,2298}
+E/qdgralloc(23052): GetSize: Unrecognized pixel format: 0x3b
+W/qdgralloc(23052): gralloc failed to allocate buffer for size 0 format 59 AWxAH 1x1 usage 2816
+E/Gralloc4(23052): isSupported(1, 1, 59, 1, ...) failed with 7
+E/GraphicBufferAllocator(23052): Failed to allocate (4 x 4) layerCount 1 format 59 usage b00: 7
+E/AHardwareBuffer(23052): GraphicBuffer(w=4, h=4, lc=1) failed (Unknown error -7), handle=0x0
+E/qdgralloc(23052): GetSize: Unrecognized pixel format: 0x3b
+W/qdgralloc(23052): gralloc failed to allocate buffer for size 0 format 59 AWxAH 1x1 usage 2816
+E/Gralloc4(23052): isSupported(1, 1, 59, 1, ...) failed with 7
+E/GraphicBufferAllocator(23052): Failed to allocate (4 x 4) layerCount 1 format 59 usage b00: 7
+E/AHardwareBuffer(23052): GraphicBuffer(w=4, h=4, lc=1) failed (Unknown error -7), handle=0x0
+W/qdgralloc(23052): getInterlacedFlag: getMetaData returned 3, defaulting to interlaced_flag = 0
+W/qdgralloc(23052): getInterlacedFlag: getMetaData returned 3, defaulting to interlaced_flag = 0
+W/qdgralloc(23052): getInterlacedFlag: getMetaData returned 3, defaulting to interlaced_flag = 0
+W/qdgralloc(23052): getInterlacedFlag: getMetaData returned 3, defaulting to interlaced_flag = 0
+W/qdgralloc(23052): getInterlacedFlag: getMetaData returned 3, defaulting to interlaced_flag = 0
+I/SurfaceView(23052): 50299702 surfaceChanged -- format=4 w=1080 h=2298
+I/SV[50299702 MainActivity](23052): surfaceChanged (1080,2298) 1 #1 io.flutter.embedding.android.FlutterSurfaceView{2ff8336 V.E...... ......ID 0,0-1080,2298}
+I/SurfaceView(23052): 50299702 surfaceRedrawNeeded
+I/SurfaceView(23052): 50299702 finishedDrawing
+V/SurfaceView(23052): Layout: x=0 y=0 w=1080 h=2298, frame=Rect(0, 0 - 1080, 2298)
+D/VRI[MainActivity]@21f6aa3(23052): reportNextDraw android.view.ViewRootImpl.performTraversals:5507 android.view.ViewRootImpl.doTraversal:3959 android.view.ViewRootImpl$TraversalRunnable.run:13034 android.view.Choreographer$CallbackRecord.run:1961 android.view.Choreographer$CallbackRecord.run:1970 
+D/VRI[MainActivity]@21f6aa3(23052): Setup new sync=wmsSync-VRI[MainActivity]@21f6aa3#5
+I/VRI[MainActivity]@21f6aa3(23052): Creating new active sync group VRI[MainActivity]@21f6aa3#6
+D/VRI[MainActivity]@21f6aa3(23052): Start draw after previous draw not visible
+D/VRI[MainActivity]@21f6aa3(23052): registerCallbacksForSync syncBuffer=false
+D/SurfaceView(23052): 50299702 updateSurfacePosition RenderWorker, frameNr = 1, position = [0, 0, 1080, 2298] surfaceSize = 1080x2298
+I/SV[50299702 MainActivity](23052): uSP: rtp = Rect(0, 0 - 1080, 2298) rtsw = 1080 rtsh = 2298
+I/SV[50299702 MainActivity](23052): onSSPAndSRT: pl = 0 pt = 0 sx = 1.0 sy = 1.0
+I/SV[50299702 MainActivity](23052): aOrMT: VRI[MainActivity]@21f6aa3 t = android.view.SurfaceControl$Transaction@a8167e0 fN = 1 android.view.SurfaceView.-$$Nest$mapplyOrMergeTransaction:0 android.view.SurfaceView$SurfaceViewPositionUpdateListener.positionChanged:2029 android.graphics.RenderNode$CompositePositionUpdateListener.positionChanged:401 
+I/VRI[MainActivity]@21f6aa3(23052): mWNT: t=0xb4000077466fba00 mBlastBufferQueue=0xb40000764b6db800 fn= 1 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.SurfaceView.applyOrMergeTransaction:1960 android.view.SurfaceView.-$$Nest$mapplyOrMergeTransaction:0 android.view.SurfaceView$SurfaceViewPositionUpdateListener.positionChanged:2029 
+D/VRI[MainActivity]@21f6aa3(23052): Received frameDrawingCallback syncResult=0 frameNum=1.
+I/VRI[MainActivity]@21f6aa3(23052): mWNT: t=0xb400007746473600 mBlastBufferQueue=0xb40000764b6db800 fn= 1 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.ViewRootImpl$12.onFrameDraw:15561 android.view.ThreadedRenderer$1.onFrameDraw:751 <bottom of call stack> 
+I/VRI[MainActivity]@21f6aa3(23052): Setting up sync and frameCommitCallback
+I/BLASTBufferQueue(23052): [VRI[MainActivity]@21f6aa3#2](f:0,a:0,s:0) onFrameAvailable the first frame is available
+I/SurfaceComposerClient(23052): apply transaction with the first frame. layerId: 11792, bufferData(ID: 99007586107427, frameNumber: 1)
+I/VRI[MainActivity]@21f6aa3(23052): Received frameCommittedCallback lastAttemptedDrawFrameNum=1 didProduceBuffer=true
+D/VRI[MainActivity]@21f6aa3(23052): reportDrawFinished seqId=0
+I/InsetsSourceConsumer(23052): applyRequestedVisibilityToControl: visible=true, type=statusBars, host=com.winup.namoro/com.winup.namoro.MainActivity
+I/InsetsSourceConsumer(23052): applyRequestedVisibilityToControl: visible=true, type=navigationBars, host=com.winup.namoro/com.winup.namoro.MainActivity
+D/VRI[MainActivity]@21f6aa3(23052): mThreadedRenderer.initializeIfNeeded()#2 mSurface={isValid=true 0xb40000764bc68900}
+I/BLASTBufferQueue(23052): [2ff8336 SurfaceView[com.winup.namoro/com.winup.namoro.MainActivity]@0#3](f:0,a:0,s:0) onFrameAvailable the first frame is available
+I/SurfaceComposerClient(23052): apply transaction with the first frame. layerId: 11797, bufferData(ID: 99007586107422, frameNumber: 1)
+D/InputMethodManagerUtils(23052): startInputInner - Id : 0
+I/InputMethodManager(23052): startInputInner - IInputMethodManagerGlobalInvoker.startInputOrWindowGainedFocus
+D/InputTransport(23052): Input channel constructed: 'ClientS', fd=174
+D/InsetsController(23052): hide(ime())
+I/ImeTracker(23052): com.winup.namoro:c82f9103: onCancelled at PHASE_CLIENT_ALREADY_HIDDEN
+E/com.facebook.GraphResponse(23052): {HttpStatus: 400, errorCode: 190, subErrorCode: -1, errorType: OAuthException, errorMessage: Error validating application. Invalid application ID.}
+I/VRI[MainActivity]@21f6aa3(23052): call setFrameRateCategory for touch hint category=high hint, reason=touch, vri=VRI[MainActivity]@21f6aa3
+E/com.facebook.GraphResponse(23052): {HttpStatus: 400, errorCode: 100, subErrorCode: 33, errorType: GraphMethodException, errorMessage: Unsupported post request. Object with ID 'appID' does not exist, cannot be loaded due to missing permissions, or does not support this operation. Please read the Graph API documentation at https://developers.facebook.com/docs/graph-api}
+E/com.facebook.GraphResponse(23052): {HttpStatus: 400, errorCode: 100, subErrorCode: 33, errorType: GraphMethodException, errorMessage: Unsupported post request. Object with ID 'appID' does not exist, cannot be loaded due to missing permissions, or does not support this operation. Please read the Graph API documentation at https://developers.facebook.com/docs/graph-api}
+E/com.facebook.GraphResponse(23052): {HttpStatus: 400, errorCode: 190, subErrorCode: -1, errorType: OAuthException, errorMessage: Error validating application. Invalid application ID.}
+E/com.facebook.GraphResponse(23052): {HttpStatus: 400, errorCode: 190, subErrorCode: -1, errorType: OAuthException, errorMessage: Error validating application. Invalid application ID.}
+E/com.facebook.GraphResponse(23052): {HttpStatus: 400, errorCode: 190, subErrorCode: -1, errorType: OAuthException, errorMessage: Error validating application. Invalid application ID.}
+E/com.facebook.GraphResponse(23052): {HttpStatus: 400, errorCode: 190, subErrorCode: -1, errorType: OAuthException, errorMessage: Error validating application. Invalid application ID.}
+E/com.facebook.GraphResponse(23052): {HttpStatus: 400, errorCode: 190, subErrorCode: -1, errorType: OAuthException, errorMessage: Error validating application. Invalid application ID.}
+E/com.facebook.GraphResponse(23052): {HttpStatus: 400, errorCode: 190, subErrorCode: -1, errorType: OAuthException, errorMessage: Error validating application. Invalid application ID.}
+E/com.facebook.GraphResponse(23052): {HttpStatus: 400, errorCode: 190, subErrorCode: -1, errorType: OAuthException, errorMessage: Error validating application. Invalid application ID.}
+E/com.facebook.GraphResponse(23052): {HttpStatus: 400, errorCode: 190, subErrorCode: -1, errorType: OAuthException, errorMessage: Error validating application. Invalid application ID.}
+E/com.facebook.GraphResponse(23052): {HttpStatus: 400, errorCode: 190, subErrorCode: -1, errorType: OAuthException, errorMessage: Error validating application. Invalid application ID.}
+I/ImeFocusController(23052): onPreWindowFocus: skipped hasWindowFocus=false mHasImeFocus=true
+I/ImeFocusController(23052): onPostWindowFocus: skipped hasWindowFocus=false mHasImeFocus=true
+I/VRI[MainActivity]@21f6aa3(23052): handleAppVisibility mAppVisible = true visible = false
+D/VRI[MainActivity]@21f6aa3(23052): visibilityChanged oldVisibility=true newVisibility=false
+I/SV[50299702 MainActivity](23052): onWindowVisibilityChanged(8) false io.flutter.embedding.android.FlutterSurfaceView{2ff8336 V.E...... ........ 0,0-1080,2298} of VRI[MainActivity]@21f6aa3
+I/SurfaceView(23052): 50299702 Changes: creating=false format=false size=false visible=true alpha=false hint=false left=false top=false z=false attached=true lifecycleStrategy=false
+I/SurfaceView(23052): 50299702 Cur surface: Surface(name=null mNativeObject=-5476376638798682880)/@0x9e3d285
+I/SurfaceView(23052): 50299702 surfaceDestroyed
+I/SV[50299702 MainActivity](23052): surfaceDestroyed callback.size 1 #2 io.flutter.embedding.android.FlutterSurfaceView{2ff8336 V.E...... ........ 0,0-1080,2298}
+I/SV[50299702 MainActivity](23052): updateSurface: mVisible = false mSurface.isValid() = true
+I/SV[50299702 MainActivity](23052): releaseSurfaces: viewRoot = VRI[MainActivity]@21f6aa3
+V/SurfaceView(23052): Layout: x=0 y=0 w=1080 h=2298, frame=Rect(0, 0 - 1080, 2298)
+D/SurfaceView(23052): 252506423 windowPositionLost, frameNr = 0
+D/HWUI    (23052): CacheManager::trimMemory(20)
+I/VRI[MainActivity]@21f6aa3(23052): Relayout returned: old=(0,0,1080,2340) new=(0,0,1080,2340) relayoutAsync=false req=(1080,2340)8 dur=5 res=0x2 s={false 0x0} ch=true seqId=0
+I/SV[50299702 MainActivity](23052): windowStopped(true) false io.flutter.embedding.android.FlutterSurfaceView{2ff8336 V.E...... ........ 0,0-1080,2298} of VRI[MainActivity]@21f6aa3
+D/SV[50299702 MainActivity](23052): updateSurface: surface is not valid
+I/SV[50299702 MainActivity](23052): releaseSurfaces: viewRoot = VRI[MainActivity]@21f6aa3
+D/VRI[MainActivity]@21f6aa3(23052): applyTransactionOnDraw applyImmediately
+D/SV[50299702 MainActivity](23052): updateSurface: surface is not valid
+I/SV[50299702 MainActivity](23052): releaseSurfaces: viewRoot = VRI[MainActivity]@21f6aa3
+D/VRI[MainActivity]@21f6aa3(23052): applyTransactionOnDraw applyImmediately
+D/VRI[MainActivity]@21f6aa3(23052): Not drawing due to not visible. Reason=!mAppVisible && !mForceDecorViewVisibility
+D/VRI[MainActivity]@21f6aa3(23052): Pending transaction will not be applied in sync with a draw due to view not visible
+I/VRI[MainActivity]@21f6aa3(23052): mWNT: t=0xb40000774428e400 mBlastBufferQueue=0xnull fn= 0 HdrRenderState mRenderHdrSdrRatio=1.0 caller= android.view.ViewRootImpl.handleSyncRequestWhenNoAsyncDraw:6812 android.view.ViewRootImpl.performTraversals:5568 android.view.ViewRootImpl.doTraversal:3959 
+D/HWUI    (23052): CacheManager::trimMemory(20)
+I/VRI[MainActivity]@21f6aa3(23052): stopped(true) old = false
+D/VRI[MainActivity]@21f6aa3(23052): WindowStopped on com.winup.namoro/com.winup.namoro.MainActivity set to true
+D/HWUI    (23052): CacheManager::trimMemory(20)
+D/SV[50299702 MainActivity](23052): updateSurface: surface is not valid
+I/SV[50299702 MainActivity](23052): releaseSurfaces: viewRoot = VRI[MainActivity]@21f6aa3
+D/VRI[MainActivity]@21f6aa3(23052): applyTransactionOnDraw applyImmediately
+D/InputTransport(23052): Input channel destroyed: 'ClientS', fd=174
+D/SV[50299702 MainActivity](23052): updateSurface: surface is not valid
+I/SV[50299702 MainActivity](23052): releaseSurfaces: viewRoot = VRI[MainActivity]@21f6aa3
+D/VRI[MainActivity]@21f6aa3(23052): applyTransactionOnDraw applyImmediately
+D/BBA2    (23052): setIsFg isFg = false; delayValue 3999ms
+D/Choreographer(23052): BBA2 receive callback when in bg : 4
+D/HWUI    (23052): CacheManager::trimMemory(40)

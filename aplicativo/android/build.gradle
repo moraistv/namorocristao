@@ -1,0 +1,61 @@
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.buildDir = "../build"
+subprojects {
+    project.buildDir = "${rootProject.buildDir}/${project.name}"
+}
+
+// ── Patches para plugins antigos (compatibilidade com AGP 8 + JDK 21) ──
+// Precisa ser registrado ANTES do evaluationDependsOn(":app").
+subprojects {
+    afterEvaluate { project ->
+        // 1) Injeta `namespace` em plugins que só têm `package` no manifesto.
+        if (project.extensions.findByName("android") != null) {
+            def androidExt = project.extensions.getByName("android")
+            if (androidExt.namespace == null) {
+                def pkg = null
+                try {
+                    def manifestFile = androidExt.sourceSets.main.manifest.srcFile
+                    if (manifestFile != null && manifestFile.exists()) {
+                        def manifest = new XmlParser(false, false).parse(manifestFile)
+                        def attr = manifest.attribute("package")
+                        if (attr != null) {
+                            pkg = attr.toString()
+                        }
+                    }
+                } catch (Exception ignored) {
+                }
+                if (pkg == null || pkg.isEmpty()) {
+                    pkg = project.group?.toString()
+                }
+                if (pkg != null && !pkg.isEmpty()) {
+                    println("[namespace-patch] ${project.name} -> ${pkg}")
+                    androidExt.namespace = pkg
+                }
+            }
+        }
+
+        // 2) Remove `-Werror` (plugins antigos quebram no JDK 21 por causa do
+        //    aviso "source value 8 is obsolete"). Registrado no afterEvaluate p/
+        //    rodar DEPOIS de o plugin adicionar a flag; reforçado com doFirst.
+        project.tasks.withType(JavaCompile).configureEach {
+            options.compilerArgs.removeAll(["-Werror"])
+            doFirst {
+                options.compilerArgs.removeAll(["-Werror"])
+            }
+        }
+    }
+}
+
+subprojects {
+    project.evaluationDependsOn(":app")
+}
+
+tasks.register("clean", Delete) {
+    delete rootProject.buildDir
+}

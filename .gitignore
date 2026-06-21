@@ -1,0 +1,51 @@
+# ----- Node -----
+node_modules/
+dist/
+build/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ----- Env / segredos -----
+.env
+.env.*
+!.env.example
+!.env.production.example
+
+# ----- Uploads (mídia enviada pelos usuários) -----
+api/uploads/
+uploads/
+
+# ----- Flutter (app) -----
+aplicativo/.dart_tool/
+aplicativo/.flutter-plugins
+aplicativo/.flutter-plugins-dependencies
+aplicativo/build/
+aplicativo/.idea/
+aplicativo/android/.gradle/
+aplicativo/android/app/debug/
+aplicativo/android/app/release/
+aplicativo/**/GeneratedPluginRegistrant.*
+aplicativo/ios/Pods/
+
+# ----- IDE / OS -----
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
+
+# ----- Pastas não usadas no deploy (legado / referência) -----
+_tabler_src/
+painel/
+cloud_functions/
+
+# ----- Artefatos de build do Android (Flutter) -----
+**/.cxx/
+aplicativo/android/.kotlin/
+aplicativo/android/app/.cxx/
+aplicativo/android/app/debug/
+aplicativo/android/app/release/
+
+# ----- Arquivos avulsos -----
+*.zip
+*.docx

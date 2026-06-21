@@ -1,0 +1,18 @@
+-- AlterTable
+ALTER TABLE "ad_settings" ADD COLUMN     "androidAppOpenId" TEXT,
+ADD COLUMN     "androidNativeId" TEXT,
+ADD COLUMN     "androidRewardedInterstitialId" TEXT,
+ADD COLUMN     "appOpenEnabled" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "appOpenEverySecs" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "appOpenOnResume" BOOLEAN NOT NULL DEFAULT true,
+ADD COLUMN     "bannerPosition" TEXT NOT NULL DEFAULT 'bottom',
+ADD COLUMN     "interstitialEveryClicks" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "interstitialOnOpenChat" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "interstitialOnOpenProfile" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "interstitialOnSwipe" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "maxAdsPerDay" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "maxAdsPerSession" INTEGER NOT NULL DEFAULT 0,
+ADD COLUMN     "nativeEnabled" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "rewardedInterstitialEnabled" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN     "testDeviceIds" TEXT,
+ADD COLUMN     "testMode" BOOLEAN NOT NULL DEFAULT true;

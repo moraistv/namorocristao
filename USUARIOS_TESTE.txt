@@ -1,0 +1,43 @@
+==================================================================
+  NAMORO CRISTÃO — USUÁRIOS DE TESTE
+  Senha de TODOS: 123456
+==================================================================
+
+>>> ADMIN (painel http://localhost:5173)
+  admin@namoro.com / admin12345   (super-admin)
+
+------------------------------------------------------------------
+>>> PERFIS DE TESTE DO APP (10 perfis com fotos)
+    Senha: 123456 — todos com 3 imagens (rosto + 2 lifestyle)
+------------------------------------------------------------------
+
+MULHERES
+  1) Ana Beatriz       ana.beatriz@teste.com     25 anos · São Paulo      · Batista
+  2) Juliana Costa     juliana.costa@teste.com   28 anos · Campinas       · Presbiteriana
+  3) Mariana Lima      mariana.lima@teste.com    23 anos · São Paulo      · Assembleia de Deus
+  4) Carolina Souza    carolina.souza@teste.com  30 anos · Rio de Janeiro · Católica
+  5) Letícia Martins   leticia.martins@teste.com 26 anos · Belo Horizonte · Batista
+  6) Fernanda Alves    fernanda.alves@teste.com  32 anos · Curitiba       · Luterana
+
+HOMENS
+  7) Lucas Pereira     lucas.pereira@teste.com   27 anos · São Paulo      · Batista
+  8) Gabriel Santos    gabriel.santos@teste.com  29 anos · Campinas       · Presbiteriana
+  9) Rafael Oliveira   rafael.oliveira@teste.com 31 anos · Rio de Janeiro · Assembleia de Deus
+ 10) Tiago Rocha       tiago.rocha@teste.com     24 anos · Belo Horizonte · Batista
+
+------------------------------------------------------------------
+>>> OUTROS USUÁRIOS (criados durante os testes)
+------------------------------------------------------------------
+  maria@teste.com   / 123456
+  alice2@teste.com  / 123456   (perfil: Alice Santos)
+  bob2@teste.com    / 123456   (perfil: Bob Oliveira)
+
+==================================================================
+DICA: pra testar match, logue como um perfil, dê like em outro,
+depois logue no outro e dê like de volta → vira match e libera o chat.
+==================================================================
+
+
+
+root - qgms4rwRuEAc
+ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=6 root@178.105.144.27

@@ -1,0 +1,53 @@
+# Docker Compose de PRODUÇÃO — Namoro Cristão (Postgres + API + Painel)
+# Usado pelo Dokploy. Variáveis sensíveis vêm do ambiente do Dokploy.
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-namoro}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-namoro}
+      POSTGRES_DB: ${POSTGRES_DB:-namoro_cristao}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-namoro} -d ${POSTGRES_DB:-namoro_cristao}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3333
+      DATABASE_URL: postgresql://${POSTGRES_USER:-namoro}:${POSTGRES_PASSWORD:-namoro}@postgres:5432/${POSTGRES_DB:-namoro_cristao}?schema=public
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_ACCESS_EXPIRES: ${JWT_ACCESS_EXPIRES:-15m}
+      JWT_REFRESH_EXPIRES: ${JWT_REFRESH_EXPIRES:-30d}
+      GOOGLE_CLIENT_IDS: ${GOOGLE_CLIENT_IDS:-}
+      FCM_SERVER_KEY: ${FCM_SERVER_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+    volumes:
+      - uploads:/app/uploads
+    ports:
+      - "3333:3333"
+
+  painel:
+    build:
+      context: ./painel-web
+      args:
+        VITE_API_BASE: ${VITE_API_BASE}
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+
+volumes:
+  pg_data:
+  uploads:

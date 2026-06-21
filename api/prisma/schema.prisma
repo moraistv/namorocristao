@@ -1,0 +1,461 @@
+// Prisma schema — Namoro Cristão API
+// Banco: PostgreSQL. Atende app (Flutter) + painel admin (React/TS).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ───────────────────────── Enums ─────────────────────────
+
+enum AuthProvider {
+  EMAIL
+  GOOGLE
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+}
+
+enum InteractionType {
+  LIKE
+  DISLIKE
+  SUPERLIKE
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  AUDIO
+  GIFT
+  PHOTO_REQUEST
+  SYSTEM
+}
+
+enum VerificationStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum ReportStatus {
+  PENDING
+  REVIEWED
+  DISMISSED
+}
+
+enum AccountDeleteStatus {
+  PENDING
+  DONE
+  CANCELED
+}
+
+enum PhotoAccessStatus {
+  PENDING
+  APPROVED
+  DENIED
+}
+
+enum AdminPermission {
+  VERIFICATION
+  REPORT
+  ACCOUNT_DELETE
+}
+
+// ─────────────────────── Usuários do app ───────────────────────
+
+model User {
+  id           String       @id @default(uuid())
+  email        String       @unique
+  emailVerified Boolean     @default(false)
+  passwordHash String?
+  provider     AuthProvider @default(EMAIL)
+  googleId     String?      @unique
+  isBanned     Boolean      @default(false)
+  suspendedUntil DateTime?
+  isPremium    Boolean      @default(false)
+  premiumPlan  String?      // "monthly" | "quarterly" | "yearly"
+  premiumUntil DateTime?
+  superLikesUsedToday Int   @default(0)
+  superLikesResetAt   DateTime?
+  boostsRemaining     Int   @default(0)
+  credits             Int   @default(0)
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  deletedAt    DateTime?
+
+  profile Profile?
+
+  @@map("users")
+}
+
+model Profile {
+  id              String   @id @default(uuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  fullName        String
+  gender          Gender
+  birthday        DateTime
+  about           String?
+  // Intenção (namoro sério, amizade, casamento) — era "myPurpose" no template
+  intention       String?
+
+  // Campos cristãos
+  denomination    String?
+  churchFrequency String?
+
+  city            String?
+  interests       String[] @default([])
+  mediaFiles      String[] @default([])
+  lockedPhotos    String[] @default([])
+  profilePicture  String?
+
+  // Redes sociais (opcionais)
+  instagram       String?
+  tiktok          String?
+  twitter         String?
+  facebook        String?
+
+  // Localização
+  latitude        Float?
+  longitude       Float?
+  addressText     String?
+
+  isVerified      Boolean  @default(false)
+  isOnline        Boolean  @default(false)
+  lastActiveAt    DateTime?
+
+  // Recursos premium / engajamento
+  boostUntil      DateTime?          // em destaque na descoberta até esta hora
+  incognito       Boolean  @default(false) // não aparece na descoberta (só quem ele curtiu)
+  prompts         Json?              // perguntas de fé: [{q, a}]
+
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("profiles")
+}
+
+// ─────────────────────── Admins do painel ───────────────────────
+
+model Admin {
+  id           String            @id @default(uuid())
+  name         String
+  email        String            @unique
+  passwordHash String
+  permissions  AdminPermission[] @default([])
+  isSuperAdmin Boolean           @default(false)
+  createdAt    DateTime          @default(now())
+
+  @@map("admins")
+}
+
+// ─────────────────────── Descoberta / Match / Chat ───────────────────────
+
+model Interaction {
+  id         String          @id @default(uuid())
+  fromUserId String
+  toUserId   String
+  type       InteractionType
+  note       String?
+  createdAt  DateTime        @default(now())
+
+  @@unique([fromUserId, toUserId])
+  @@index([toUserId])
+  @@map("interactions")
+}
+
+model Match {
+  id        String    @id @default(uuid())
+  userAId   String
+  userBId   String
+  isActive  Boolean   @default(true)
+  createdAt DateTime  @default(now())
+
+  messages  Message[]
+
+  @@unique([userAId, userBId])
+  @@index([userAId])
+  @@index([userBId])
+  @@map("matches")
+}
+
+model Message {
+  id        String      @id @default(uuid())
+  matchId   String
+  match     Match       @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  senderId  String
+  type      MessageType @default(TEXT)
+  content   String
+  readAt    DateTime?
+  createdAt DateTime    @default(now())
+
+  @@index([matchId])
+  @@map("messages")
+}
+
+// ─────────────────────── Moderação / segurança ───────────────────────
+
+model VerificationForm {
+  id           String             @id @default(uuid())
+  userId       String
+  selfieUrl    String
+  status       VerificationStatus @default(PENDING)
+  reviewedById String?
+  createdAt    DateTime           @default(now())
+
+  @@index([status])
+  @@map("verification_forms")
+}
+
+model Report {
+  id         String       @id @default(uuid())
+  reporterId String
+  reportedId String
+  reason     String
+  status     ReportStatus @default(PENDING)
+  createdAt  DateTime     @default(now())
+
+  @@index([reportedId])
+  @@map("reports")
+}
+
+model Block {
+  id        String   @id @default(uuid())
+  blockerId String
+  blockedId String
+  createdAt DateTime @default(now())
+
+  @@unique([blockerId, blockedId])
+  @@map("blocks")
+}
+
+model BannedUser {
+  id        String   @id @default(uuid())
+  userId    String   @unique
+  reason    String?
+  createdAt DateTime @default(now())
+
+  @@map("banned_users")
+}
+
+model AccountDeleteRequest {
+  id        String              @id @default(uuid())
+  userId    String              @unique
+  status    AccountDeleteStatus @default(PENDING)
+  createdAt DateTime            @default(now())
+
+  @@map("account_delete_requests")
+}
+
+// ─────────────────────── Notificações / dispositivos / feed ───────────────────────
+
+model DeviceToken {
+  id        String   @id @default(uuid())
+  userId    String
+  token     String   @unique
+  platform  String?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("device_tokens")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  title     String
+  body      String
+  type      String?
+  data      Json?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("notifications")
+}
+
+model Feed {
+  id        String   @id @default(uuid())
+  userId    String
+  content   String?
+  mediaUrls String[] @default([])
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("feeds")
+}
+
+// ─────────────────────── Configurações do app ───────────────────────
+
+model AppSettings {
+  id                           Int      @id @default(1)
+  isChattingEnabledBeforeMatch Boolean  @default(false)
+  // Flags/parâmetros de recursos (gerenciados no painel)
+  boostDurationMin       Int     @default(30)
+  superLikeMessageEnabled Boolean @default(true)
+  rewindPremiumOnly      Boolean  @default(true)
+  incognitoPremiumOnly   Boolean  @default(true)
+  dailyVerseEnabled      Boolean  @default(true)
+  freeDailyLikes         Int      @default(0) // 0 = ilimitado p/ grátis
+  updatedAt                    DateTime @updatedAt
+
+  @@map("app_settings")
+}
+
+model DailyVerse {
+  id        String   @id @default(uuid())
+  reference String   // ex.: "Provérbios 3:5"
+  text      String
+  active    Boolean  @default(true)
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@map("daily_verses")
+}
+
+// ─────────────────────── Códigos OTP por e-mail ───────────────────────
+
+enum EmailCodePurpose {
+  LOGIN
+  VERIFY
+}
+
+model EmailCode {
+  id         String           @id @default(uuid())
+  email      String
+  codeHash   String
+  purpose    EmailCodePurpose @default(LOGIN)
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime         @default(now())
+
+  @@index([email])
+  @@map("email_codes")
+}
+
+model PhotoAccessRequest {
+  id          String            @id @default(uuid())
+  requesterId String
+  ownerId     String
+  status      PhotoAccessStatus @default(PENDING)
+  createdAt   DateTime          @default(now())
+
+  @@unique([requesterId, ownerId])
+  @@index([ownerId])
+  @@index([requesterId])
+  @@map("photo_access_requests")
+}
+
+// ─────────────────────── Logs de acesso (segurança / IP) ───────────────────────
+
+model AccessLog {
+  id        String   @id @default(uuid())
+  userId    String
+  ip        String?
+  userAgent String?
+  action    String   // register | login | login_code | google
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("access_logs")
+}
+
+// ─────────────────────── Monetização (planos, créditos, presentes, anúncios) ───────────────────────
+
+enum ProductKind {
+  PREMIUM
+  CREDITS
+  SUPERLIKES
+  BOOSTS
+}
+
+model Product {
+  id              String      @id @default(uuid())
+  kind            ProductKind
+  title           String
+  description     String?
+  googleProductId String? // SKU da Google Play (compra in-app)
+  priceCents      Int         @default(0)
+  amount          Int         @default(0) // créditos/superlikes/boosts concedidos
+  durationDays    Int? // apenas PREMIUM
+  active          Boolean     @default(true)
+  sortOrder       Int         @default(0)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@map("products")
+}
+
+model Gift {
+  id          String   @id @default(uuid())
+  name        String
+  imageUrl    String
+  costCredits Int      @default(1)
+  active      Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@map("gifts")
+}
+
+model AdSettings {
+  id      Int     @id @default(1)
+  enabled Boolean @default(false)
+  testMode      Boolean @default(true)
+  testDeviceIds String?
+
+  // Formatos ativados
+  appOpenEnabled              Boolean @default(false)
+  bannerEnabled               Boolean @default(true)
+  interstitialEnabled         Boolean @default(true)
+  rewardedEnabled             Boolean @default(true)
+  rewardedInterstitialEnabled Boolean @default(false)
+  nativeEnabled               Boolean @default(false)
+
+  // Ad unit IDs (Android)
+  androidAppOpenId              String?
+  androidBannerId               String?
+  androidInterstitialId         String?
+  androidRewardedId             String?
+  androidRewardedInterstitialId String?
+  androidNativeId               String?
+
+  // Banner
+  bannerPosition String @default("bottom") // top | bottom
+
+  // App Open
+  appOpenOnResume  Boolean @default(true)
+  appOpenEverySecs Int     @default(0)
+
+  // Intersticial — gatilhos/frequência
+  interstitialEverySecs     Int     @default(120)
+  interstitialEveryClicks   Int     @default(0)
+  interstitialOnOpenChat    Boolean @default(false)
+  interstitialOnOpenProfile Boolean @default(false)
+  interstitialOnSwipe       Boolean @default(false)
+
+  // Limites globais (frequency caps)
+  maxAdsPerSession Int @default(0)
+  maxAdsPerDay     Int @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  @@map("ad_settings")
+}
+
+model MonetizationSettings {
+  id               Int      @id @default(1)
+  creditPriceCents Int      @default(100) // valor de 1 crédito (centavos)
+  currency         String   @default("BRL")
+  updatedAt        DateTime @updatedAt
+
+  @@map("monetization_settings")
+}
