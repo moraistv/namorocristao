@@ -2,7 +2,6 @@
 class ApiConfig {
   ApiConfig._();
 
-  /// IP do PC (servidor da API) na rede local. O celular acessa por aqui.
-  /// Em produção, trocar pela URL pública da VPS (https).
-  static const String baseUrl = "http://192.168.3.253:3333/api";
+  /// URL pública da API (VPS, atrás do domínio com HTTPS).
+  static const String baseUrl = "https://api.mypair.app/api";
 }
