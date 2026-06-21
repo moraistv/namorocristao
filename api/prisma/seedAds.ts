@@ -1,4 +1,6 @@
-import { prisma } from "../src/config/prisma";
+import { PrismaClient } from "@prisma/client";
+
+const prisma = new PrismaClient();
 
 // IDs de TESTE oficiais do Google (Android).
 const TEST = {

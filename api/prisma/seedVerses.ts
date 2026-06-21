@@ -1,4 +1,6 @@
-import { prisma } from "../src/config/prisma";
+import { PrismaClient } from "@prisma/client";
+
+const prisma = new PrismaClient();
 
 const VERSES = [
   { reference: "1 Coríntios 13:4-5", text: "O amor é paciente, o amor é bondoso. Não inveja, não se vangloria, não se orgulha. Não maltrata, não procura seus interesses, não se ira facilmente, não guarda rancor." },
