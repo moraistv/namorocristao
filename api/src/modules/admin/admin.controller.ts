@@ -112,35 +112,79 @@ const CITY_UF: Record<string, { uf: string; nome: string }> = {
   "goiania": { uf: "GO", nome: "Goiás" },
 };
 
+// Todos os 27 estados (sigla → nome).
+const UF_NAMES: Record<string, string> = {
+  AC: "Acre", AL: "Alagoas", AP: "Amapá", AM: "Amazonas", BA: "Bahia",
+  CE: "Ceará", DF: "Distrito Federal", ES: "Espírito Santo", GO: "Goiás",
+  MA: "Maranhão", MT: "Mato Grosso", MS: "Mato Grosso do Sul", MG: "Minas Gerais",
+  PA: "Pará", PB: "Paraíba", PR: "Paraná", PE: "Pernambuco", PI: "Piauí",
+  RJ: "Rio de Janeiro", RN: "Rio Grande do Norte", RS: "Rio Grande do Sul",
+  RO: "Rondônia", RR: "Roraima", SC: "Santa Catarina", SP: "São Paulo",
+  SE: "Sergipe", TO: "Tocantins",
+};
+
+function stripAccents(s: string): string {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+}
+
+// nome por extenso → sigla (ex.: "piaui" → "PI")
+const STATE_NAME_TO_UF: Record<string, string> = Object.fromEntries(
+  Object.entries(UF_NAMES).map(([uf, nome]) => [stripAccents(nome), uf]),
+);
+
+/**
+ * Resolve o estado (UF) de um perfil. Prioriza o `addressText`
+ * ("Cidade - UF - País", onde UF é a sigla salva pelo app), com fallback no
+ * mapa de cidades. Cobre todos os 27 estados (antes só ~15 capitais).
+ */
+function resolveUf(
+  city?: string | null,
+  addressText?: string | null,
+): { uf: string; nome: string } | null {
+  if (addressText) {
+    const parts = addressText.split(/\s*-\s*/).map((p) => p.trim()).filter(Boolean);
+    for (const part of parts) {
+      const up = part.toUpperCase();
+      if (UF_NAMES[up]) return { uf: up, nome: UF_NAMES[up] };
+      const byName = STATE_NAME_TO_UF[stripAccents(part)];
+      if (byName) return { uf: byName, nome: UF_NAMES[byName] };
+    }
+  }
+  const key = (city || "").trim().toLowerCase();
+  if (CITY_UF[key]) return CITY_UF[key];
+  return null;
+}
+
 // GET /api/admin/stats/locations — usuários por estado (BR) e por cidade.
 export async function locationStats(_req: Request, res: Response) {
-  const grouped = await prisma.profile.groupBy({
-    by: ["city"],
-    _count: { city: true },
+  const profiles = await prisma.profile.findMany({
+    select: { city: true, addressText: true },
   });
 
   const states = new Map<string, { uf: string; nome: string; count: number }>();
-  const cities: { city: string; count: number }[] = [];
+  const cityCounts = new Map<string, number>();
   let outros = 0;
 
-  for (const g of grouped) {
-    const count = g._count.city;
-    const raw = (g.city || "").trim();
-    if (raw) cities.push({ city: raw, count });
-    const key = raw.toLowerCase();
-    const uf = CITY_UF[key];
-    if (uf) {
-      const cur = states.get(uf.uf) ?? { uf: uf.uf, nome: uf.nome, count: 0 };
-      cur.count += count;
-      states.set(uf.uf, cur);
+  for (const p of profiles) {
+    const raw = (p.city || "").trim();
+    if (raw) cityCounts.set(raw, (cityCounts.get(raw) ?? 0) + 1);
+
+    const info = resolveUf(p.city, p.addressText);
+    if (info) {
+      const cur = states.get(info.uf) ?? { uf: info.uf, nome: info.nome, count: 0 };
+      cur.count += 1;
+      states.set(info.uf, cur);
     } else {
-      outros += count;
+      outros += 1;
     }
   }
 
   const byState = Array.from(states.values()).sort((a, b) => b.count - a.count);
   if (outros > 0) byState.push({ uf: "—", nome: "Outros", count: outros });
-  const topCities = cities.sort((a, b) => b.count - a.count).slice(0, 6);
+  const topCities = Array.from(cityCounts.entries())
+    .map(([city, count]) => ({ city, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 6);
 
   res.json({ byState, topCities });
 }
@@ -282,8 +326,7 @@ export async function userDetail(req: Request, res: Response) {
   const lastIp = accessLogs[0]?.ip ?? null;
 
   // Localização (cidade -> UF/estado) para o mapa.
-  const cityKey = (user.profile?.city || "").trim().toLowerCase();
-  const ufInfo = CITY_UF[cityKey];
+  const ufInfo = resolveUf(user.profile?.city, user.profile?.addressText);
   const location = {
     city: user.profile?.city ?? null,
     uf: ufInfo?.uf ?? null,

@@ -89,6 +89,9 @@ class _ChatPageState extends State<ChatPage> {
     } catch (_) {}
     setState(() => _loading = false);
     _scrollToBottom();
+    // Marca como lido de forma confiável (REST) ao abrir — cobre mensagens
+    // acumuladas do bot/broadcast mesmo se o socket ainda não conectou.
+    AppApi.markRead(widget.matchId);
     _refreshAccess();
     _refreshPresence();
     _presenceTimer =
@@ -98,7 +101,10 @@ class _ChatPageState extends State<ChatPage> {
       onMessage: (msg) {
         if (msg["matchId"] == widget.matchId) {
           _addMessage(msg);
-          if (msg["senderId"] != _myId) _socket.markRead(widget.matchId);
+          if (msg["senderId"] != _myId) {
+            _socket.markRead(widget.matchId);
+            AppApi.markRead(widget.matchId); // confiável (REST), inclusive p/ bot
+          }
         }
       },
       onRead: (matchId, by) {
