@@ -24,9 +24,8 @@ class ChatSocket {
     final socket = io.io(
       _origin,
       io.OptionBuilder()
-          // polling primeiro (passa por qualquer proxy/CDN), depois sobe p/ websocket.
+          // polling conecta primeiro (compatível com proxy/CDN) e sobe p/ websocket.
           .setTransports(["polling", "websocket"])
-          // Path sob /api/ (mesmo roteamento que já serve a API no Traefik).
           .setPath("/api/socket.io/")
           .disableAutoConnect()
           .enableForceNew()
