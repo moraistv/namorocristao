@@ -177,7 +177,7 @@ export async function listUsers(req: Request, res: Response) {
       take,
       skip,
       orderBy: { createdAt: "desc" },
-      include: { user: { select: { email: true, isBanned: true, suspendedUntil: true, createdAt: true } } },
+      include: { user: { select: { email: true, provider: true, isBanned: true, suspendedUntil: true, createdAt: true } } },
     }),
     prisma.profile.count({ where }),
   ]);
@@ -189,6 +189,7 @@ export async function listUsers(req: Request, res: Response) {
       userId: p.userId,
       fullName: p.fullName,
       email: p.user.email,
+      provider: p.user.provider,
       gender: p.gender,
       age: ageFromBirthday(p.birthday),
       city: p.city,
