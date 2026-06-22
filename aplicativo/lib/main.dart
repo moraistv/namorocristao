@@ -31,13 +31,12 @@ void main() async {
     MobileAds.instance.initialize();
   }
 
-  // ⚠️ Migração para a VPS: enquanto `kBackendReady` for false, o app sobe SEM Firebase
-  // (auth/dados/push ainda não estão religados na VPS). Isso permite ver o rebrand no
-  // dispositivo sem depender de backend. Ver PROGRESSO_FLUTTER.md.
-  if (kBackendReady) {
+  // Firebase (Analytics + Push/FCM). NÃO usamos Firebase Auth — o login é na
+  // nossa API (VPS). Só inicializamos o core + messaging.
+  try {
     await Firebase.initializeApp();
     FirebaseMessaging.onBackgroundMessage(_handleBackgroundNotification);
-  }
+  } catch (_) {}
 
   await Hive.initFlutter();
   await Hive.openBox(HiveConstants.hiveBox);

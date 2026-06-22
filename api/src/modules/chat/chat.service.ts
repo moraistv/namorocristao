@@ -2,6 +2,7 @@ import { MessageType } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { AppError } from "../../lib/errors";
 import { pushOnly } from "../../lib/push";
+import { triggerBotReply } from "../chatbot/chatbot.service";
 
 /** Garante que o usuário faz parte do match e que ele está ativo. Retorna o id do outro. */
 export async function assertMembership(userId: string, matchId: string) {
@@ -63,6 +64,15 @@ export async function sendMessage(params: {
       ? "🎁 Presente"
       : content.slice(0, 80);
   pushOnly(otherId, sender?.fullName ?? "Nova mensagem", preview, { matchId, type: "message" });
+
+  // Se o destinatário for um BOT/Modelo, ele responde sozinho (regra → IA → fallback).
+  triggerBotReply({
+    matchId,
+    botUserId: otherId,
+    fromUserId: senderId,
+    content,
+    type: params.type ?? "TEXT",
+  });
 
   return { message, otherId };
 }

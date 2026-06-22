@@ -196,6 +196,21 @@ class AppApi {
     return await _request("GET", "/me/stats") as Map<String, dynamic>;
   }
 
+  // ── Device / Push (FCM) ──
+  static Future<void> registerDevice(String token,
+      {String platform = "android"}) async {
+    try {
+      await _request("POST", "/devices",
+          body: {"token": token, "platform": platform});
+    } catch (_) {}
+  }
+
+  static Future<void> removeDevice(String token) async {
+    try {
+      await _request("DELETE", "/devices", body: {"token": token});
+    } catch (_) {}
+  }
+
   static Future<void> setOnline(bool online) async {
     try {
       await _request("POST", "/me/online", body: {"isOnline": online});

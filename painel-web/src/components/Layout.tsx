@@ -4,6 +4,7 @@ import {
   IconLayoutDashboard, IconUsers, IconRosetteDiscountCheck, IconFlag,
   IconBan, IconTrash, IconShieldCheck, IconSettings,
   IconLogout, IconHeart, IconShoppingCart, IconSpeakerphone, IconBook2, IconBell,
+  IconRobot, IconMessageChatbot, IconChartBar,
 } from "@tabler/icons-react";
 import { useAuth } from "../auth";
 import { get } from "../api";
@@ -32,6 +33,9 @@ export default function Layout({ children }: { children: ReactNode }) {
     { to: "/exclusoes", label: "Exclusões", icon: IconTrash, badge: counts.del },
     { to: "/planos", label: "Planos", icon: IconShoppingCart },
     { to: "/anuncios", label: "Anúncios", icon: IconSpeakerphone },
+    { to: "/modelos", label: "Modelos", icon: IconRobot },
+    { to: "/chatbot/regras", label: "Regras do Bot", icon: IconMessageChatbot },
+    { to: "/chatbot/analytics", label: "Analytics Bot", icon: IconChartBar },
     { to: "/versos", label: "Versos", icon: IconBook2 },
     { to: "/notificacoes", label: "Notificações", icon: IconBell },
     ...(admin?.isSuperAdmin ? [{ to: "/admins", label: "Admins", icon: IconShieldCheck }] : []),

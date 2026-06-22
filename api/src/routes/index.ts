@@ -11,6 +11,7 @@ import { deviceRouter } from "../modules/device/device.routes";
 import { photoAccessRouter } from "../modules/photoAccess/photoAccess.routes";
 import { devRouter } from "../modules/dev/dev.routes";
 import { monetizationAdminRouter, configPublicRouter } from "../modules/monetization/monetization.routes";
+import { chatbotAdminRouter } from "../modules/chatbot/chatbot.routes";
 
 export const router = Router();
 
@@ -34,6 +35,7 @@ if (process.env.NODE_ENV !== "production") {
 // ── Painel admin (gestão) ──
 router.use("/admin", adminRouter);
 router.use("/admin", monetizationAdminRouter); // produtos, presentes, créditos, anúncios
+router.use("/admin", chatbotAdminRouter); // chatbot (regras/analytics/settings) + bots
 
 // ── Config pública (app lê em tempo real) ──
 router.use("/config", configPublicRouter);

@@ -49,3 +49,7 @@ aplicativo/android/app/release/
 # ----- Arquivos avulsos -----
 *.zip
 *.docx
+
+# ----- Firebase (credenciais do app) -----
+aplicativo/android/app/google-services.json
+aplicativo/ios/Runner/GoogleService-Info.plist

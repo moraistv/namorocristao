@@ -1625,3 +1625,72 @@ O `ProfilePage` (e Curtidas/Descobrir) só carregava status premium no `initStat
 ## Validação
 - API `tsc` limpo; `flutter analyze` nos 8 arquivos → **No issues found**.
 - (App NÃO foi rodado a pedido do usuário; validado só por análise estática.)
+
+---
+
+# 📌 Ver também: ANALISE_APP_REFERENCIA.md (21/06/2026)
+Análise detalhada do app de referência ("Encontros"/mypair.app antigo) enviado pelo dono.
+Mapeia o backlog do que falta agregar no Namoro Cristão: **Modelos (perfis isca) + papel Gerente**,
+**Bots/Regras de Chatbot + Analytics + Bots com IA**, **Gamificação (níveis/XP/moedas/gemas/missões/ranking)**,
+**presente no card de descoberta**, **Disparo de Modelos**, **Hotmart + Webhook Logs**, **Vendas/Gerentes/Push Ativos**.
+
+---
+
+# 🚀 DEPLOY EM PRODUÇÃO — VPS + Dokploy + domínio (21/06/2026)
+
+## Infra
+- **VPS** Hetzner Ubuntu (IP `178.105.144.27`), root. Docker CE instalado (repo apontado p/ `noble` pois o Ubuntu é muito novo - `resolute`).
+- **Dokploy** instalado (`curl -sSL https://dokploy.com/install.sh | sh` com `ADVERTISE_ADDR=178.105.144.27`). Painel em `:3000`. Traefik gerencia 80/443.
+- **GitHub** privado: `moraistv/namorocristao` (branch `main`). Autodeploy ligado (push → redeploy).
+
+## Arquivos de produção (no repo)
+- `api/Dockerfile` (multi-stage: build TS + prisma generate; runtime slim com `npx prisma migrate deploy && node dist/server.js`).
+- `painel-web/Dockerfile` (build Vite com ARG `VITE_API_BASE` → nginx) + `painel-web/nginx.conf` (SPA fallback).
+- `docker-compose.yml` (raiz): postgres (volume `pg_data`) + api (volume `uploads`) + painel. Rede `internal` + `dokploy-network` (external) p/ o Traefik.
+- `.dockerignore` (api e painel), `.gitignore` (exclui node_modules, .env, uploads, build, aplicativo/build, painel/ antigo, cloud_functions/, _tabler_src/, zip/docx).
+- `painel-web/src/api.ts`: `API_BASE` agora vem de `import.meta.env.VITE_API_BASE`.
+- `aplicativo/lib/config/api_config.dart`: `baseUrl = https://api.mypair.app/api`.
+
+## Domínios (Cloudflare → Traefik/Let's Encrypt)
+- `api.mypair.app` → serviço `api` porta 3333 (HTTPS LE).
+- `admin.mypair.app` → serviço `painel` porta 80 (HTTPS LE).
+- Registros A no Cloudflare apontando p/ `178.105.144.27`, **nuvem cinza (DNS only)** p/ a emissão do certificado (depois pode ligar proxy laranja com SSL Full strict).
+
+## Variáveis no Dokploy (Environment do Compose)
+`POSTGRES_USER/PASSWORD/DB`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `JWT_*_EXPIRES`, `GOOGLE_CLIENT_IDS`, `FCM_SERVER_KEY`, `CORS_ORIGINS=https://admin.mypair.app`, `VITE_API_BASE=https://api.mypair.app/api`.
+
+## Seeds rodados no container de produção (via `docker exec`)
+- `npx tsx prisma/simulate.ts` → maria@teste.com com curtidas/super likes + 2 matches com conversa.
+- `npx tsx prisma/seedAds.ts` → AdSettings com IDs de teste do Google (ligado).
+- `npx tsx prisma/seedVerses.ts` → 12 versículos.
+- ⚠️ Correção: `seedAds.ts`/`seedVerses.ts` passaram a instanciar `new PrismaClient()` próprio (antes importavam de `../src/config/prisma`, que não existe na imagem de runtime).
+
+## Estado
+- ✅ `https://api.mypair.app/api/health` → 200.
+- ✅ `https://admin.mypair.app` → painel (criar 1º super admin via needs-setup).
+- ✅ Postgres com volume persistente; uploads com volume persistente; migrations aplicadas no deploy.
+- 🔜 Recompilar o APP Flutter apontando p/ `https://api.mypair.app/api` e reinstalar no celular (o app instalado ainda usa o IP local antigo).
+
+---
+
+# ✅ Firebase + Login Google (22/06/2026)
+
+## Firebase ligado (Analytics + Push)
+- `google-services.json` em `aplicativo/android/app/` (project `namoro-cristao-ff3d4`, gitignored).
+- Gradle: plugin `com.google.gms.google-services` (settings.gradle 4.4.2 apply false + app build.gradle aplicado).
+- `main.dart`: `Firebase.initializeApp()` sempre (Analytics + FCM), sem usar Firebase Auth (login é na nossa API). Background handler registrado.
+- `AnalyticsService` agora funciona (init no boot).
+- **Push FCM v1** (`api/src/lib/push.ts`): legado removido; usa service account via `FIREBASE_SERVICE_ACCOUNT_B64` (JSON em base64 — evita quebra de `.env`) ou as 3 vars separadas. Token OAuth via `google-auth-library`, envia em `https://fcm.googleapis.com/v1/projects/{id}/messages:send`. Limpa token inválido (404/400).
+- App registra token FCM em `/api/devices` após login (`main_shell._setupPush`); toque na push → aba Chat (mensagem/match) ou Curtidas (like). Permissão POST_NOTIFICATIONS no manifesto.
+- Env no Dokploy: `FIREBASE_SERVICE_ACCOUNT_B64` (base64 do service account).
+
+## Login com Google (ponta a ponta)
+- Backend já tinha `/auth/google` + `verifyGoogleIdToken` (audience = `GOOGLE_CLIENT_IDS`).
+- App: `AuthApi.loginWithGoogle(idToken)` → `/auth/google`; `login_page._signInWithGoogle` usa `GoogleSignIn(serverClientId: ApiConfig.googleServerClientId)` → idToken → nossa API → navega (MainShell/Onboarding).
+- `ApiConfig.googleServerClientId` = Web client ID `340892561469-fasut20v6d4tfq6e5u9ih31l33ofat9m.apps.googleusercontent.com`.
+- Firebase: SHA-1 do debug adicionado (`A2:95:93:41:...:0E:63`), provedor Google habilitado em Authentication (gera o Web client ID).
+- Dokploy: `GOOGLE_CLIENT_IDS=340892561469-fasut20v6d4tfq6e5u9ih31l33ofat9m.apps.googleusercontent.com`.
+- ⚠️ Produção/Play Store: adicionar depois o SHA-1 da chave de release (App Signing).
+
+## Validação
+- `flutter analyze` limpo; API `tsc` limpo. App rodando no celular (porta 38291). `/auth/google` com token falso → 401 (confirma env configurado).

@@ -232,6 +232,19 @@ export async function swipe(
     return { matched: false as const };
   }
 
+  // Bots/Modelos curtem de volta automaticamente → match na hora.
+  const targetUser = await prisma.user.findUnique({
+    where: { id: toUserId },
+    select: { isBot: true },
+  });
+  if (targetUser?.isBot) {
+    await prisma.interaction.upsert({
+      where: { fromUserId_toUserId: { fromUserId: toUserId, toUserId: fromUserId } },
+      create: { fromUserId: toUserId, toUserId: fromUserId, type: "LIKE" },
+      update: {},
+    });
+  }
+
   // Verifica se o outro já curtiu/super curtiu o usuário atual.
   const reciprocal = await prisma.interaction.findUnique({
     where: { fromUserId_toUserId: { fromUserId: toUserId, toUserId: fromUserId } },

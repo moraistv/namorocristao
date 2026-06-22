@@ -68,6 +68,13 @@ enum AdminPermission {
   ACCOUNT_DELETE
 }
 
+enum BotPersonality {
+  ALL
+  SHY
+  FUNNY
+  EXTROVERT
+}
+
 // ─────────────────────── Usuários do app ───────────────────────
 
 model User {
@@ -86,6 +93,10 @@ model User {
   superLikesResetAt   DateTime?
   boostsRemaining     Int   @default(0)
   credits             Int   @default(0)
+  // Bot / Modelo (perfil controlado pelo sistema, responde sozinho)
+  isBot          Boolean         @default(false)
+  botPersonality BotPersonality?
+  botAiEnabled   Boolean         @default(false)
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   deletedAt    DateTime?
@@ -458,4 +469,49 @@ model MonetizationSettings {
   updatedAt        DateTime @updatedAt
 
   @@map("monetization_settings")
+}
+
+// ─────────────────────── Chatbot / Bots de IA ───────────────────────
+
+model ChatbotRule {
+  id          String         @id @default(uuid())
+  category    String         // ex.: "saudacao", "elogio"
+  personality BotPersonality @default(ALL)
+  priority    Int            @default(5) // 0–10 (maior ganha)
+  keywords    String[]       @default([])
+  responses   String[]       @default([]) // bot sorteia uma; aceita {name} {age} {city}
+  active      Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@map("chatbot_rules")
+}
+
+model ChatbotLog {
+  id              String   @id @default(uuid())
+  userId          String   // quem enviou a mensagem
+  botUserId       String?
+  message         String
+  matchedCategory String?  // null = fallback (sem regra)
+  usedAi          Boolean  @default(false)
+  language        String   @default("pt")
+  createdAt       DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("chatbot_logs")
+}
+
+model BotSettings {
+  id             Int      @id @default(1)
+  aiEnabled      Boolean  @default(false)
+  aiProvider     String   @default("openai")
+  aiModel        String   @default("gpt-4o-mini")
+  aiApiKey       String?
+  aiSystemPrompt String   @default("Voce e uma pessoa crista simpatica em um app de namoro. Responda de forma curta, calorosa e natural, em portugues do Brasil.")
+  replyMinMs     Int      @default(1200) // atraso minimo da resposta (parece humano)
+  replyMaxMs     Int      @default(3500) // atraso maximo
+  fallbackText   String   @default("Que interessante! Me conta mais sobre voce 😊")
+  updatedAt      DateTime @updatedAt
+
+  @@map("bot_settings")
 }

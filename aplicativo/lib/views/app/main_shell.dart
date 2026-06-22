@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:mioamoreapp/services/app_api.dart';
 import 'package:mioamoreapp/services/ads_service.dart';
 import 'package:mioamoreapp/services/interstitial_manager.dart';
@@ -68,6 +69,9 @@ class _MainShellState extends State<MainShell> {
 
     // Carrega config de anúncios (AdMob) e pré-carrega o intersticial.
     AdsService.load().then((_) => InterstitialManager.preload());
+
+    // Push/FCM: pede permissão, registra o token e trata toques nas notificações.
+    _setupPush();
 
     // Pede localização: se ainda não tem permissão, mostra a nossa tela;
     // caso já tenha, só atualiza em silêncio.
@@ -188,6 +192,33 @@ class _MainShellState extends State<MainShell> {
         _tick.value++; // e a lista de conversas
       },
     );
+  }
+
+  Future<void> _setupPush() async {
+    try {
+      final fm = FirebaseMessaging.instance;
+      await fm.requestPermission();
+      final token = await fm.getToken();
+      if (token != null) await AppApi.registerDevice(token);
+      fm.onTokenRefresh.listen((t) => AppApi.registerDevice(t));
+
+      // App em background e aberto ao tocar na notificação.
+      FirebaseMessaging.onMessageOpenedApp.listen(_handlePushTap);
+      // App fechado (terminado) e aberto por uma notificação.
+      final initial = await fm.getInitialMessage();
+      if (initial != null) _handlePushTap(initial);
+    } catch (_) {}
+  }
+
+  /// Ao tocar numa push: mensagem/match → aba Chat; curtida → aba Curtidas.
+  void _handlePushTap(RemoteMessage m) {
+    if (!mounted) return;
+    final type = m.data["type"]?.toString() ?? "";
+    if (type == "like" || type == "superlike") {
+      setState(() => _index = 1);
+    } else {
+      setState(() => _index = 2);
+    }
   }
 
   Future<void> _forceLogout(String message) async {

@@ -17,6 +17,9 @@ import Gifts from "./pages/Gifts";
 import Ads from "./pages/Ads";
 import Verses from "./pages/Verses";
 import Notifications from "./pages/Notifications";
+import Bots from "./pages/Bots";
+import ChatbotRules from "./pages/ChatbotRules";
+import ChatbotAnalytics from "./pages/ChatbotAnalytics";
 
 export default function App() {
   const { admin, loading } = useAuth();
@@ -42,6 +45,9 @@ export default function App() {
         <Route path="/anuncios" element={<Ads />} />
         <Route path="/versos" element={<Verses />} />
         <Route path="/notificacoes" element={<Notifications />} />
+        <Route path="/modelos" element={<Bots />} />
+        <Route path="/chatbot/regras" element={<ChatbotRules />} />
+        <Route path="/chatbot/analytics" element={<ChatbotAnalytics />} />
         {admin.isSuperAdmin && <Route path="/admins" element={<Admins />} />}
         <Route path="/configuracoes" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" />} />
