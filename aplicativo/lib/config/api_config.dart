@@ -8,5 +8,6 @@ class ApiConfig {
   /// Web Client ID do OAuth (Google), usado como serverClientId no login Google.
   /// Pega no google-services.json (client com client_type 3) OU no Google Cloud
   /// Console após adicionar o SHA-1 no Firebase. Deixe "" para desabilitar.
-  static const String googleServerClientId = "";
+  static const String googleServerClientId =
+      "340892561469-fasut20v6d4tfq6e5u9ih31l33ofat9m.apps.googleusercontent.com";
 }
