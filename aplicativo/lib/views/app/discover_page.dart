@@ -1,7 +1,6 @@
 import 'dart:ui';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_easyloading/flutter_easyloading.dart';
 import 'package:flutter_card_swiper/flutter_card_swiper.dart';
 import 'package:mioamoreapp/services/app_api.dart';
 import 'package:mioamoreapp/services/analytics_service.dart';
@@ -28,7 +27,6 @@ class _DiscoverPageState extends State<DiscoverPage> {
   DiscoverFilters _filters = DiscoverFilters();
   int _superLikesLeft = 0;
   bool _isPremium = false;
-  int _boosts = 0;
   String? _pendingSuperNote;
 
   @override
@@ -51,7 +49,6 @@ class _DiscoverPageState extends State<DiscoverPage> {
       setState(() {
         _superLikesLeft = (s["superLikesLeft"] as num?)?.toInt() ?? 0;
         _isPremium = s["isPremium"] == true;
-        _boosts = (s["boostsRemaining"] as num?)?.toInt() ?? 0;
       });
     } catch (_) {}
   }
@@ -189,42 +186,6 @@ class _DiscoverPageState extends State<DiscoverPage> {
     );
   }
 
-  /// Rewind: desfaz o último swipe (VIP, configurável).
-  Future<void> _rewind() async {
-    try {
-      await AppApi.undoSwipe();
-      EasyLoading.showSuccess("Swipe desfeito");
-      _load();
-    } on AppApiException catch (e) {
-      if (e.statusCode == 403) {
-        _openPremium("O Rewind é VIP — desfaça quem você passou!");
-      } else {
-        EasyLoading.showInfo(e.message);
-      }
-    }
-  }
-
-  /// Boost/Turbo: destaque na descoberta.
-  Future<void> _boost() async {
-    if (_boosts <= 0) {
-      _openPremium("Compre Boosts para se destacar no topo! 🚀");
-      return;
-    }
-    try {
-      final res = await AppApi.activateBoost();
-      AnalyticsService.boost();
-      _loadStats();
-      final min = res["minutes"] ?? 30;
-      EasyLoading.showSuccess("Você está em destaque por $min min! 🚀");
-    } on AppApiException catch (e) {
-      if (e.statusCode == 403) {
-        _openPremium("Compre Boosts para se destacar! 🚀");
-      } else {
-        EasyLoading.showInfo(e.message);
-      }
-    }
-  }
-
   bool _onSwipe(int prev, int? current, CardSwiperDirection dir) {
     final user = _cards[prev];
     if (dir == CardSwiperDirection.right) {
@@ -324,7 +285,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
             scale: 1.0,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             allowedSwipeDirection:
-                const AllowedSwipeDirection.only(left: true, right: true, up: true),
+                const AllowedSwipeDirection.only(left: true, right: true),
             onSwipe: _onSwipe,
             onEnd: _load,
             cardBuilder: (context, index, px, py) => _DiscoverCard(
@@ -340,42 +301,17 @@ class _DiscoverPageState extends State<DiscoverPage> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _smallBtn(Icons.replay, const Color(0xFFF5A623), _rewind),
-              const SizedBox(width: 16),
               _actionBtn(Icons.close, Colors.white, AppTheme.navy,
                   () => _controller.swipe(CardSwiperDirection.left)),
-              const SizedBox(width: 16),
+              const SizedBox(width: 24),
               _superLikeBtn(),
-              const SizedBox(width: 16),
+              const SizedBox(width: 24),
               _actionBtn(Icons.favorite, AppTheme.gold, Colors.white,
                   () => _controller.swipe(CardSwiperDirection.right)),
-              const SizedBox(width: 16),
-              _smallBtn(Icons.bolt, const Color(0xFF7B61FF), _boost),
             ],
           ),
         ),
       ],
-    );
-  }
-
-  Widget _smallBtn(IconData icon, Color color, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 46,
-        height: 46,
-        decoration: BoxDecoration(
-          color: Colors.white,
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-                color: Colors.black.withOpacity(0.10),
-                blurRadius: 8,
-                offset: const Offset(0, 3)),
-          ],
-        ),
-        child: Icon(icon, color: color, size: 22),
-      ),
     );
   }
 
