@@ -41,3 +41,17 @@ depois logue no outro e dê like de volta → vira match e libera o chat.
 
 root - qgms4rwRuEAc
 ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=6 root@178.105.144.27
+
+
+As cores principais do app são:
+
+Dourado: #D4AF37 — RGB (212, 175, 55) → rgb(212, 175, 55)
+Navy (azul escuro): #111D40 — RGB (17, 29, 64) → rgb(17, 29, 64)
+Tons de apoio do dourado que a gente usa:
+
+Dourado claro (gradiente): #E9C75A → RGB (233, 199, 90)
+Dourado escuro (tema escuro): #E1C04A → RGB (225, 192, 74)
+Resumo rápido pra colar onde precisar:
+
+Dourado: 212,175,55
+Azul navy: 17,29,64

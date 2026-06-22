@@ -87,6 +87,14 @@
             android:name="com.google.android.gms.ads.APPLICATION_ID"
             android:value="ca-app-pub-3940256099942544~3347511713"/>
 
+        <!-- Ícone e cor padrão das notificações (FCM) — silhueta branca + dourado -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_notify" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/notification_gold" />
+
         <!-- Resolve conflito de manifest entre AdMob (play-services-ads) e
              Firebase Analytics (play-services-measurement), que declaram a mesma
              property AD_SERVICES_CONFIG com recursos diferentes. -->

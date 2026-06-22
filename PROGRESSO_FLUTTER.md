@@ -1730,3 +1730,17 @@ Admin cria um Modelo → aparece na descoberta → usuário curte → match auto
 
 ## Validação
 - API `tsc` limpo (após `prisma generate`); painel `tsc` limpo.
+
+---
+
+# ✅ Ajustes Descobrir + Disparo de Modelos (22/06/2026)
+
+## Descobrir — só 3 botões
+- `discover_page.dart`: removidos os botões Rewind e Boost da barra. Ficam apenas **Passar (✖️), Super Like (⭐) e Curtir (❤️)**.
+- `allowedSwipeDirection` agora é **só left/right** — arrastar pra cima NÃO dá super like; super like só pelo botão (que usa swipe programático top, não bloqueado).
+- Métodos/campos sem uso removidos (_rewind, _boost, _smallBtn, _boosts). `flutter analyze` limpo.
+
+## Disparo de Modelos (broadcast)
+- Backend `POST /admin/bots/:userId/broadcast { text, audience: all|free|premium|online, limit? }`: para cada usuário-alvo cria/garante match com o Modelo + interação, cria mensagem do Modelo, emite `message:new` e `pushOnly`. Cap padrão 500.
+- Painel (Modelos): botão **Disparar** em cada card + modal (público + mensagem). Mostra quantos receberam.
+- Não exige mudança no app (entrega via socket/push já existentes).
