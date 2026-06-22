@@ -10,24 +10,54 @@ import { JWT } from "google-auth-library";
  *     real via FCM HTTP v1 (funciona com o app fechado/background).
  *
  * Usa o FCM HTTP v1 (a API legada com "server key" foi desativada pelo Google).
- * Variáveis necessárias no .env:
- *   FIREBASE_PROJECT_ID
- *   FIREBASE_CLIENT_EMAIL
- *   FIREBASE_PRIVATE_KEY   (com \n escapados; trocamos por quebras reais)
+ * Credenciais (escolha UMA forma):
+ *   • FIREBASE_SERVICE_ACCOUNT_B64  → o JSON inteiro do service account em base64
+ *     (RECOMENDADO: uma linha só, sem dor de cabeça com quebras de linha).
+ *   • OU as três separadas: FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL,
+ *     FIREBASE_PRIVATE_KEY (com \n escapados).
  */
 
-const FB_PROJECT_ID = process.env.FIREBASE_PROJECT_ID || "";
-const FB_CLIENT_EMAIL = process.env.FIREBASE_CLIENT_EMAIL || "";
-const FB_PRIVATE_KEY = (process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n");
+interface ServiceAccount {
+  projectId: string;
+  clientEmail: string;
+  privateKey: string;
+}
 
-const fcmEnabled = Boolean(FB_PROJECT_ID && FB_CLIENT_EMAIL && FB_PRIVATE_KEY);
+function loadServiceAccount(): ServiceAccount | null {
+  const b64 = process.env.FIREBASE_SERVICE_ACCOUNT_B64 || "";
+  if (b64) {
+    try {
+      const json = JSON.parse(Buffer.from(b64, "base64").toString("utf8"));
+      if (json.project_id && json.client_email && json.private_key) {
+        return {
+          projectId: json.project_id,
+          clientEmail: json.client_email,
+          privateKey: String(json.private_key).replace(/\\n/g, "\n"),
+        };
+      }
+    } catch {
+      // base64/JSON inválido → tenta as variáveis separadas
+    }
+  }
+  const projectId = process.env.FIREBASE_PROJECT_ID || "";
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL || "";
+  const privateKey = (process.env.FIREBASE_PRIVATE_KEY || "").replace(/\\n/g, "\n");
+  if (projectId && clientEmail && privateKey) {
+    return { projectId, clientEmail, privateKey };
+  }
+  return null;
+}
+
+const sa = loadServiceAccount();
+const FB_PROJECT_ID = sa?.projectId ?? "";
+const fcmEnabled = Boolean(sa);
 
 let jwtClient: JWT | null = null;
 function getJwt(): JWT {
   if (!jwtClient) {
     jwtClient = new JWT({
-      email: FB_CLIENT_EMAIL,
-      key: FB_PRIVATE_KEY,
+      email: sa!.clientEmail,
+      key: sa!.privateKey,
       scopes: ["https://www.googleapis.com/auth/firebase.messaging"],
     });
   }
