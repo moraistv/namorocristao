@@ -25,6 +25,8 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _isPremium = false;
   int _superLikes = 0;
   int _boosts = 0;
+  int _credits = 0;
+  DateTime? _premiumUntil;
   List<Map<String, dynamic>> _verses = [];
   int _verseIndex = 0;
   Timer? _verseTimer;
@@ -79,6 +81,10 @@ class _ProfilePageState extends State<ProfilePage> {
         _isPremium = s["isPremium"] == true;
         _superLikes = (s["superLikesLeft"] as num?)?.toInt() ?? 0;
         _boosts = (s["boostsRemaining"] as num?)?.toInt() ?? 0;
+        _credits = (s["credits"] as num?)?.toInt() ?? 0;
+        _premiumUntil = s["premiumUntil"] != null
+            ? DateTime.tryParse(s["premiumUntil"].toString())
+            : null;
       });
     } catch (_) {}
   }
@@ -405,13 +411,11 @@ class _ProfilePageState extends State<ProfilePage> {
 
   Widget _quickCards() {
     final cards = <Widget>[
-      _quickCard(Icons.star_rounded, const Color(0xFF3FA9F5),
-          "$_superLikes Super Likes", _openStore),
-      if (!_isPremium)
-        _quickCard(Icons.workspace_premium, AppTheme.gold, "Assinar Plus",
-            _openPremium)
-      else
-        _quickCard(Icons.storefront_rounded, AppTheme.gold, "Loja", _openStore),
+      _quickCard(Icons.star_rounded, const Color(0xFF3FA9F5), "$_superLikes",
+          "Super Likes", _openStore),
+      _quickCard(Icons.monetization_on_rounded, const Color(0xFFE0A91B),
+          "$_credits", "Créditos", _openStore),
+      if (_isPremium) _vipCard(),
     ];
     return Row(
       children: [
@@ -423,12 +427,13 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  // Card compacto (horizontal): ícone + texto + "+", ocupa menos espaço.
-  Widget _quickCard(IconData icon, Color color, String label, VoidCallback onTap) {
+  // Mini-card vertical compacto: ícone + valor + rótulo (cabe 2 ou 3 por linha).
+  Widget _quickCard(
+      IconData icon, Color color, String value, String label, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 12),
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(14),
@@ -440,28 +445,95 @@ class _ProfilePageState extends State<ProfilePage> {
                 offset: const Offset(0, 2)),
           ],
         ),
-        child: Row(
+        child: Column(
           children: [
             Container(
-              width: 34,
-              height: 34,
+              width: 36,
+              height: 36,
               decoration: BoxDecoration(
                 color: color.withOpacity(0.14),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(icon, color: color, size: 20),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(label,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                      color: AppTheme.navy,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12.5)),
+            const SizedBox(height: 7),
+            Text(value,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: AppTheme.navy,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15)),
+            Text(label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: Color(0xFF8A91A3),
+                    fontWeight: FontWeight.w600,
+                    fontSize: 11)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Card VIP (mesmo tamanho dos outros, fundo dourado pra chamar atenção).
+  Widget _vipCard() {
+    String label;
+    if (_premiumUntil == null) {
+      label = "Ativo";
+    } else {
+      final left = _premiumUntil!.difference(DateTime.now());
+      if (left.inDays >= 1) {
+        label = "${left.inDays}d restantes";
+      } else if (left.inHours >= 1) {
+        label = "${left.inHours}h restantes";
+      } else {
+        label = "Expira em breve";
+      }
+    }
+    return GestureDetector(
+      onTap: _openPremium,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [Color(0xFFE9C75A), Color(0xFFD4AF37)]),
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+                color: AppTheme.gold.withOpacity(0.35),
+                blurRadius: 8,
+                offset: const Offset(0, 3)),
+          ],
+        ),
+        child: Column(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.28),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.workspace_premium,
+                  color: AppTheme.navy, size: 20),
             ),
-            const Icon(Icons.add, color: Color(0xFF9AA1B2), size: 18),
+            const SizedBox(height: 7),
+            const Text("VIP",
+                style: TextStyle(
+                    color: AppTheme.navy,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15)),
+            Text(label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    color: AppTheme.navy,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 11)),
           ],
         ),
       ),

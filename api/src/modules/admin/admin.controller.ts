@@ -785,6 +785,8 @@ export async function processDeleteRequest(req: Request, res: Response) {
       data: { status: "DONE" },
     }),
   ]);
+  // Avisa o app em tempo real → desconecta na hora.
+  emitToUser(userId, "config:me", { deleted: true });
   res.json({ ok: true });
 }
 

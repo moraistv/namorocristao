@@ -25,6 +25,7 @@ class ChatSocket {
       io.OptionBuilder()
           .setTransports(["websocket"])
           .disableAutoConnect()
+          .enableForceNew()
           .setAuth({"token": TokenStorage.accessToken})
           .build(),
     );

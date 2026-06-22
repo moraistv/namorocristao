@@ -182,11 +182,15 @@ class _MainShellState extends State<MainShell> {
           AdsService.setPremium(data["isPremium"] == true);
         }
         // Banido ou suspenso → desconecta imediatamente.
-        if (data["banned"] == true || data["suspended"] == true) {
+        if (data["banned"] == true ||
+            data["suspended"] == true ||
+            data["deleted"] == true) {
           _forceLogout(
             data["banned"] == true
                 ? "Sua conta foi banida."
-                : "Sua conta foi suspensa temporariamente.",
+                : data["deleted"] == true
+                    ? "Sua conta foi excluída."
+                    : "Sua conta foi suspensa temporariamente.",
           );
           return;
         }
