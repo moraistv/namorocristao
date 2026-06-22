@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:mioamoreapp/config/api_config.dart';
 import 'package:mioamoreapp/services/token_storage.dart';
@@ -23,14 +24,21 @@ class ChatSocket {
     final socket = io.io(
       _origin,
       io.OptionBuilder()
-          .setTransports(["websocket"])
+          // polling primeiro (passa por qualquer proxy/CDN), depois sobe p/ websocket.
+          .setTransports(["polling", "websocket"])
+          // Path sob /api/ (mesmo roteamento que já serve a API no Traefik).
+          .setPath("/api/socket.io/")
           .disableAutoConnect()
           .enableForceNew()
+          .enableReconnection()
           .setAuth({"token": TokenStorage.accessToken})
           .build(),
     );
 
-    socket.onConnect((_) {});
+    socket.onConnect((_) => debugPrint("🔌 socket CONECTADO ($_origin)"));
+    socket.onConnectError((e) => debugPrint("🔌 socket connect_error: $e"));
+    socket.onError((e) => debugPrint("🔌 socket error: $e"));
+    socket.onDisconnect((r) => debugPrint("🔌 socket desconectado: $r"));
     socket.on("message:new", (data) {
       if (data is Map) onMessage(Map<String, dynamic>.from(data));
     });

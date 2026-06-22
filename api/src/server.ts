@@ -10,7 +10,9 @@ async function main() {
   const httpServer = createServer(app);
 
   // Socket.io (tempo real) — chat, presença, notificações.
+  // Path sob /api/ para passar pelo mesmo roteamento (Traefik) que já serve a API.
   const io = new SocketIOServer(httpServer, {
+    path: "/api/socket.io/",
     cors: {
       origin: env.corsOrigins.length ? env.corsOrigins : true,
       credentials: true,
