@@ -9,12 +9,14 @@ import 'package:mioamoreapp/services/chat_socket.dart';
 import 'package:mioamoreapp/services/location_service.dart';
 import 'package:mioamoreapp/services/realtime_bus.dart';
 import 'package:mioamoreapp/services/token_storage.dart';
+import 'package:mioamoreapp/helpers/url_launcher_helper.dart';
 import 'package:mioamoreapp/views/app/app_theme.dart';
 import 'package:mioamoreapp/views/app/discover_page.dart';
 import 'package:mioamoreapp/views/app/enable_location_page.dart';
 import 'package:mioamoreapp/views/app/likes_page.dart';
 import 'package:mioamoreapp/views/app/matches_page.dart';
 import 'package:mioamoreapp/views/app/match_celebration.dart';
+import 'package:mioamoreapp/views/app/premium_page.dart';
 import 'package:mioamoreapp/views/app/profile_page.dart';
 import 'package:mioamoreapp/views/auth/login_page.dart';
 
@@ -210,10 +212,53 @@ class _MainShellState extends State<MainShell> {
     } catch (_) {}
   }
 
-  /// Ao tocar numa push: mensagem/match → aba Chat; curtida → aba Curtidas.
+  /// Ao tocar numa push: reporta o clique (estatística), depois navega.
+  /// - data.url        → abre link externo (navegador)
+  /// - data.route      → tela interna (discover/likes/chat/profile/plans)
+  /// - senão, fallback por type (like/superlike → Curtidas; resto → Chat)
   void _handlePushTap(RemoteMessage m) {
     if (!mounted) return;
-    final type = m.data["type"]?.toString() ?? "";
+    final data = m.data;
+
+    // Estatística de clique (campanhas do painel).
+    final broadcastId = data["broadcastId"]?.toString() ?? "";
+    if (broadcastId.isNotEmpty) {
+      AppApi.reportNotificationClick(broadcastId);
+    }
+
+    // Link externo.
+    final url = data["url"]?.toString() ?? "";
+    if (url.isNotEmpty) {
+      final uri = Uri.tryParse(url);
+      if (uri != null) UrlLauncherHelper.launchURL(uri);
+      return;
+    }
+
+    // Tela interna definida pelo painel.
+    final route = data["route"]?.toString() ?? "";
+    if (route.isNotEmpty) {
+      switch (route) {
+        case "discover":
+          setState(() => _index = 0);
+          return;
+        case "likes":
+          setState(() => _index = 1);
+          return;
+        case "chat":
+          setState(() => _index = 2);
+          return;
+        case "profile":
+          setState(() => _index = 3);
+          return;
+        case "plans":
+          Navigator.push(context,
+              MaterialPageRoute(builder: (_) => const PremiumPage()));
+          return;
+      }
+    }
+
+    // Fallback pelo tipo da notificação.
+    final type = data["type"]?.toString() ?? "";
     if (type == "like" || type == "superlike") {
       setState(() => _index = 1);
     } else {

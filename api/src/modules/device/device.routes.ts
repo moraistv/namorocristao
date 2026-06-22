@@ -12,3 +12,4 @@ deviceRouter.post("/devices", asyncHandler(c.registerDevice));
 deviceRouter.delete("/devices", asyncHandler(c.removeDevice));
 deviceRouter.get("/notifications", asyncHandler(c.listNotifications));
 deviceRouter.post("/notifications/:id/read", asyncHandler(c.readNotification));
+deviceRouter.post("/notifications/click", asyncHandler(c.trackNotificationClick));

@@ -211,6 +211,14 @@ class AppApi {
     } catch (_) {}
   }
 
+  /// Registra que o usuário tocou numa notificação de campanha (estatística do painel).
+  static Future<void> reportNotificationClick(String broadcastId) async {
+    try {
+      await _request("POST", "/notifications/click",
+          body: {"broadcastId": broadcastId});
+    } catch (_) {}
+  }
+
   static Future<void> setOnline(bool online) async {
     try {
       await _request("POST", "/me/online", body: {"isOnline": online});

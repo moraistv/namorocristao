@@ -751,11 +751,15 @@ const broadcastSchema = z.object({
   body: z.string().min(1).max(500),
   audience: z.enum(["all", "premium", "free", "online", "user"]).default("all"),
   userId: z.string().optional(),
+  imageUrl: z.string().url().max(500).optional(),
+  actionType: z.enum(["internal", "external"]).optional(),
+  actionValue: z.string().max(500).optional(),
 });
 
 // POST /api/admin/notifications/broadcast
 export async function broadcastNotification(req: Request, res: Response) {
-  const { title, body, audience, userId } = broadcastSchema.parse(req.body);
+  const { title, body, audience, userId, imageUrl, actionType, actionValue } =
+    broadcastSchema.parse(req.body);
 
   let userIds: string[] = [];
   const now = new Date();
@@ -789,18 +793,52 @@ export async function broadcastNotification(req: Request, res: Response) {
     userIds = users.map((u) => u.id);
   }
 
-  const sent = await notifyUsers(userIds, title, body, { type: "admin" });
-  res.json({ ok: true, sent });
+  // Quantos têm push real (device token) → "recebeu" de fato.
+  const withTokens = userIds.length
+    ? await prisma.deviceToken.findMany({
+        where: { userId: { in: userIds } },
+        select: { userId: true },
+        distinct: ["userId"],
+      })
+    : [];
+  const deliveredCount = withTokens.length;
+
+  // 1 linha por campanha (corrige o "virou várias" no recentes).
+  const campaign = await prisma.notificationBroadcast.create({
+    data: {
+      title,
+      body,
+      audience,
+      imageUrl: imageUrl ?? null,
+      actionType: actionType ?? null,
+      actionValue: actionValue ?? null,
+      targetedCount: userIds.length,
+      deliveredCount,
+    },
+  });
+
+  // Dados extras que vão no push/notificação (navegação + imagem + atribuição de clique).
+  const data: Record<string, string> = { type: "admin", broadcastId: campaign.id };
+  if (imageUrl) data.image = imageUrl;
+  if (actionType === "internal" && actionValue) data.route = actionValue;
+  if (actionType === "external" && actionValue) data.url = actionValue;
+
+  const sent = await notifyUsers(userIds, title, body, { type: "admin", data });
+
+  await prisma.notificationBroadcast.update({
+    where: { id: campaign.id },
+    data: { sentCount: sent },
+  });
+
+  res.json({ ok: true, sent, delivered: deliveredCount, broadcastId: campaign.id });
 }
 
-// GET /api/admin/notifications/recent — últimas notificações enviadas
+// GET /api/admin/notifications/recent — últimas campanhas enviadas (1 linha por disparo)
 export async function recentNotifications(_req: Request, res: Response) {
-  const list = await prisma.notification.findMany({
-    where: { type: "admin" },
+  const list = await prisma.notificationBroadcast.findMany({
     orderBy: { createdAt: "desc" },
     take: 40,
   });
-  // Agrupa por título+corpo+minuto (cada broadcast vira 1 linha aproximada).
   res.json({ notifications: list });
 }
 

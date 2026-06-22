@@ -26,3 +26,4 @@ chatbotAdminRouter.post("/bots", asyncHandler(c.createBot));
 chatbotAdminRouter.put("/bots/:userId", asyncHandler(c.updateBot));
 chatbotAdminRouter.delete("/bots/:userId", asyncHandler(c.deleteBot));
 chatbotAdminRouter.post("/bots/:userId/broadcast", asyncHandler(c.broadcastFromBot));
+chatbotAdminRouter.get("/bots/:userId/broadcasts", asyncHandler(c.getBroadcasts));

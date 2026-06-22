@@ -265,7 +265,8 @@ export async function deleteBot(req: Request, res: Response) {
 // ───────────────────────── Disparo de Modelos (broadcast) ─────────────────────────
 
 const broadcastSchema = z.object({
-  text: z.string().min(1).max(500),
+  text: z.string().max(500).optional(),
+  imageUrl: z.string().url().optional(),
   audience: z.enum(["all", "free", "premium", "online"]).default("all"),
   limit: z.number().int().min(1).max(2000).optional(),
 });
@@ -279,7 +280,9 @@ export async function broadcastFromBot(req: Request, res: Response) {
   });
   if (!bot || !bot.isBot) throw new AppError("Modelo não encontrado", 404);
 
-  const { text, audience, limit } = broadcastSchema.parse(req.body);
+  const { text, imageUrl, audience, limit } = broadcastSchema.parse(req.body);
+  if (!text && !imageUrl) throw new AppError("Informe texto ou imagem", 400);
+  
   const cap = limit ?? 500;
   const now = new Date();
 
@@ -303,6 +306,20 @@ export async function broadcastFromBot(req: Request, res: Response) {
     targetIds = us.map((u) => u.id);
   }
 
+  // Registra o broadcast no histórico
+  const broadcast = await prisma.botBroadcast.create({
+    data: {
+      botUserId: botId,
+      audience,
+      messageType: imageUrl ? "image" : "text",
+      text: text || null,
+      imageUrl: imageUrl || null,
+      targetedCount: targetIds.length,
+      sentCount: 0,
+      sentAt: now,
+    },
+  });
+
   const botName = bot.profile?.fullName ?? "Mensagem";
   let sent = 0;
   for (const uid of targetIds) {
@@ -318,13 +335,33 @@ export async function broadcastFromBot(req: Request, res: Response) {
       create: { fromUserId: botId, toUserId: uid, type: "LIKE" },
       update: {},
     });
+    const msgType = imageUrl ? "IMAGE" : "TEXT";
+    const msgContent = imageUrl || text || "";
     const msg = await prisma.message.create({
-      data: { matchId: match.id, senderId: botId, type: "TEXT", content: text },
+      data: { matchId: match.id, senderId: botId, type: msgType, content: msgContent },
     });
     emitToUser(uid, "message:new", msg);
-    pushOnly(uid, botName, text.slice(0, 80), { matchId: match.id, type: "message" });
+    const pushText = text || "📷 Foto";
+    pushOnly(uid, botName, pushText.slice(0, 80), { matchId: match.id, type: "message" });
     sent++;
   }
 
-  res.json({ ok: true, sent });
+  // Atualiza o contador de enviados
+  await prisma.botBroadcast.update({
+    where: { id: broadcast.id },
+    data: { sentCount: sent, deliveredCount: sent },
+  });
+
+  res.json({ ok: true, sent, broadcastId: broadcast.id });
+}
+
+// GET /api/admin/bots/:userId/broadcasts — histórico de disparos
+export async function getBroadcasts(req: Request, res: Response) {
+  const botId = req.params.userId;
+  const history = await prisma.botBroadcast.findMany({
+    where: { botUserId: botId },
+    orderBy: { sentAt: "desc" },
+    take: 20,
+  });
+  res.json({ history: history.map((h) => ({ id: h.id, text: h.text || "📷 Imagem", audience: h.audience, sent: h.sentCount, sentAt: h.sentAt })) });
 }

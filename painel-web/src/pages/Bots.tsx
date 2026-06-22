@@ -1,10 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { IconPlus, IconEdit, IconTrash, IconRobot, IconHeart, IconSend } from "@tabler/icons-react";
+import { IconPlus, IconEdit, IconTrash, IconRobot, IconHeart, IconSend, IconPhoto, IconMoodSmile, IconClock, IconCheck } from "@tabler/icons-react";
 import { API_BASE, get, post, put, del } from "../api";
 import { Dialog, DialogConfig, Toast, ToastMsg } from "../components/ui";
+import EmojiPicker from "emoji-picker-react";
 
 const ORIGIN = API_BASE.replace(/\/api$/, "");
 const PERSONALITY: Record<string, string> = { ALL: "Todas", SHY: "Tímida", FUNNY: "Engraçada", EXTROVERT: "Extrovertida" };
+
+const EMOJIS = ["😊", "💛", "😍", "🙏", "✨", "💕", "😘", "🌹", "💖", "🥰", "😇", "💝"];
 
 interface Bot {
   userId: string;
@@ -19,6 +22,14 @@ interface Bot {
   personality: string;
   aiEnabled: boolean;
   matchCount: number;
+}
+
+interface BroadcastHistory {
+  id: string;
+  text: string;
+  audience: string;
+  sent: number;
+  sentAt: string;
 }
 
 interface Form {
@@ -42,14 +53,24 @@ export default function Bots() {
   const [uploading, setUploading] = useState(false);
   const [blast, setBlast] = useState<Bot | null>(null);
   const [blastText, setBlastText] = useState("");
+  const [blastImage, setBlastImage] = useState("");
+  const [blastImageUrl, setBlastImageUrl] = useState("");
   const [blastAudience, setBlastAudience] = useState("all");
   const [blastSending, setBlastSending] = useState(false);
+  const [blastStats, setBlastStats] = useState({ sent: 0, delivered: 0, clicked: 0 });
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [history, setHistory] = useState<BroadcastHistory[]>([]);
+  const [showHistory, setShowHistory] = useState(false);
   const [dialog, setDialog] = useState<DialogConfig | null>(null);
   const [toast, setToast] = useState<ToastMsg | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const blastImageRef = useRef<HTMLInputElement>(null);
 
   async function load() {
     try { const r = await get("/admin/bots"); setBots(r.bots); } catch (e: any) { setToast({ type: "error", text: e.message }); }
+  }
+  async function loadHistory(botId: string) {
+    try { const r = await get(`/admin/bots/${botId}/broadcasts`); setHistory(r.history); } catch (e: any) { setToast({ type: "error", text: e.message }); }
   }
   useEffect(() => { load(); }, []);
 
@@ -98,13 +119,39 @@ export default function Bots() {
     } catch (e: any) { setToast({ type: "error", text: e.message }); }
   }
 
+  async function onPickBlastImage(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const b64: string = await new Promise((res, rej) => {
+        const fr = new FileReader();
+        fr.onload = () => res((fr.result as string).split(",")[1]);
+        fr.onerror = rej;
+        fr.readAsDataURL(file);
+      });
+      const ext = (file.name.split(".").pop() || "jpg").toLowerCase();
+      const r = await post("/admin/gifts/upload", { image: b64, ext });
+      const abs = r.url.startsWith("http") ? r.url : `${ORIGIN}${r.url}`;
+      setBlastImage(abs);
+      setBlastImageUrl("");
+    } catch (e: any) { setToast({ type: "error", text: e.message || "Falha no upload" }); }
+    finally { setUploading(false); if (blastImageRef.current) blastImageRef.current.value = ""; }
+  }
+
   async function sendBlast() {
     if (!blast) return;
-    if (blastText.trim().length < 1) { setToast({ type: "error", text: "Escreva a mensagem" }); return; }
-    setBlastSending(true);
+    const hasText = blastText.trim().length > 0;
+    const hasImage = blastImage || blastImageUrl.trim();
+    if (!hasText && !hasImage) { setToast({ type: "error", text: "Escreva a mensagem ou adicione uma imagem" }); return; }
+    setBlastSending(true); setBlastStats({ sent: 0, delivered: 0, clicked: 0 });
     try {
-      const r = await post(`/admin/bots/${blast.userId}/broadcast`, { text: blastText.trim(), audience: blastAudience });
-      setBlast(null); setBlastText("");
+      const body: any = { text: blastText.trim() || null, audience: blastAudience };
+      if (blastImageUrl.trim()) body.imageUrl = blastImageUrl.trim();
+      else if (blastImage) body.imageUrl = blastImage;
+      const r = await post(`/admin/bots/${blast.userId}/broadcast`, body);
+      setBlastStats({ sent: r.sent, delivered: r.sent, clicked: 0 });
+      setTimeout(() => { setBlast(null); setBlastText(""); setBlastImage(""); setBlastImageUrl(""); }, 2000);
       setToast({ type: "success", text: `Disparado para ${r.sent} usuário(s)` });
     } catch (e: any) { setToast({ type: "error", text: e.message }); }
     finally { setBlastSending(false); }
@@ -147,7 +194,7 @@ export default function Bots() {
                 </div>
               </div>
               <div className="card-footer d-flex gap-1 justify-content-end">
-                <button className="btn btn-sm btn-ghost-primary" onClick={() => { setBlast(b); setBlastText(""); setBlastAudience("all"); }}><IconSend size={15} className="me-1" />Disparar</button>
+                <button className="btn btn-sm btn-ghost-primary" onClick={() => { setBlast(b); setBlastText(""); setBlastImage(""); setBlastImageUrl(""); setBlastAudience("all"); setBlastStats({ sent: 0, delivered: 0, clicked: 0 }); loadHistory(b.userId); }}><IconSend size={15} className="me-1" />Disparar</button>
                 <button className="btn btn-sm" onClick={() => openEdit(b)}><IconEdit size={15} className="me-1" />Editar</button>
                 <button className="btn btn-sm btn-ghost-danger" onClick={() => remove(b)}><IconTrash size={15} /></button>
               </div>
@@ -208,24 +255,137 @@ export default function Bots() {
 
       {blast && (
         <div className="modal modal-blur show d-block" tabIndex={-1} style={{ background: "rgba(0,0,0,.4)" }}>
-          <div className="modal-dialog modal-dialog-centered">
+          <div className="modal-dialog modal-lg modal-dialog-centered">
             <div className="modal-content">
-              <div className="modal-header"><h5 className="modal-title">Disparar como {blast.fullName}</h5><button className="btn-close" onClick={() => setBlast(null)} /></div>
+              <div className="modal-header">
+                <h5 className="modal-title">Disparar como {blast.fullName}</h5>
+                <button className="btn-close" onClick={() => setBlast(null)} />
+              </div>
               <div className="modal-body">
-                <p className="text-secondary" style={{ fontSize: 13 }}>A mensagem chega como se o Modelo tivesse mandado. Cria o match automaticamente e notifica (push) quem receber.</p>
-                <label className="form-label">Público</label>
-                <select className="form-select mb-3" value={blastAudience} onChange={(e) => setBlastAudience(e.target.value)}>
-                  <option value="all">Todos os usuários</option>
-                  <option value="free">Somente grátis (não-VIP)</option>
-                  <option value="premium">Somente VIP</option>
-                  <option value="online">Online agora</option>
-                </select>
+                <p className="text-secondary" style={{ fontSize: 13 }}>
+                  A mensagem chega como se o Modelo tivesse mandado. Cria o match automaticamente e notifica (push) quem receber.
+                </p>
+
+                <div className="row g-3 mb-3">
+                  <div className="col-md-6">
+                    <label className="form-label">Público</label>
+                    <select className="form-select" value={blastAudience} onChange={(e) => setBlastAudience(e.target.value)}>
+                      <option value="all">Todos os usuários</option>
+                      <option value="free">Somente grátis (não-VIP)</option>
+                      <option value="premium">Somente VIP</option>
+                      <option value="online">Online agora</option>
+                    </select>
+                  </div>
+                  <div className="col-md-6">
+                    <label className="form-label">Estatísticas</label>
+                    <div className="d-flex gap-2" style={{ fontSize: 13 }}>
+                      <div className="badge bg-blue-lt">Enviados: {blastStats.sent}</div>
+                      <div className="badge bg-green-lt">Entregues: {blastStats.delivered}</div>
+                      <div className="badge bg-purple-lt">Cliques: {blastStats.clicked}</div>
+                    </div>
+                  </div>
+                </div>
+
                 <label className="form-label">Mensagem</label>
-                <textarea className="form-control" rows={3} value={blastText} onChange={(e) => setBlastText(e.target.value)} placeholder="Oi! Vi seu perfil e queria te conhecer melhor 😊" />
+                <div className="position-relative mb-2">
+                  <textarea
+                    className="form-control"
+                    rows={3}
+                    value={blastText}
+                    onChange={(e) => setBlastText(e.target.value)}
+                    placeholder="Oi! Vi seu perfil e queria te conhecer melhor 😊"
+                  />
+                  <div className="d-flex gap-1 mt-2">
+                    {EMOJIS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        className="btn btn-sm btn-ghost-secondary"
+                        onClick={() => setBlastText(blastText + emoji)}
+                        style={{ padding: "2px 8px" }}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-ghost-secondary ms-auto"
+                      onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                    >
+                      <IconMoodSmile size={16} />
+                    </button>
+                  </div>
+                  {showEmojiPicker && (
+                    <div style={{ position: "absolute", top: "100%", right: 0, zIndex: 1000 }}>
+                      <EmojiPicker onEmojiClick={(e) => { setBlastText(blastText + e.emoji); setShowEmojiPicker(false); }} />
+                    </div>
+                  )}
+                </div>
+
+                <label className="form-label">Imagem (opcional)</label>
+                <div className="mb-3">
+                  <div className="input-group mb-2">
+                    <input
+                      type="text"
+                      className="form-control"
+                      placeholder="URL da imagem externa"
+                      value={blastImageUrl}
+                      onChange={(e) => { setBlastImageUrl(e.target.value); setBlastImage(""); }}
+                    />
+                    <button className="btn btn-outline-secondary" disabled={uploading} onClick={() => blastImageRef.current?.click()}>
+                      <IconPhoto size={16} className="me-1" />
+                      {uploading ? "Enviando..." : "Upload"}
+                    </button>
+                  </div>
+                  {(blastImage || blastImageUrl) && (
+                    <div className="position-relative d-inline-block">
+                      <img src={blastImage || blastImageUrl} alt="Preview" style={{ maxWidth: 200, maxHeight: 150, borderRadius: 8 }} />
+                      <button
+                        className="btn btn-icon btn-sm btn-danger"
+                        style={{ position: "absolute", top: -8, right: -8, width: 24, height: 24 }}
+                        onClick={() => { setBlastImage(""); setBlastImageUrl(""); }}
+                      >
+                        ×
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <input ref={blastImageRef} type="file" accept="image/*" hidden onChange={onPickBlastImage} />
+
+                {history.length > 0 && (
+                  <div className="mt-3">
+                    <div className="d-flex align-items-center justify-content-between mb-2">
+                      <label className="form-label mb-0">Enviados recentemente</label>
+                      <button className="btn btn-sm btn-ghost-secondary" onClick={() => setShowHistory(!showHistory)}>
+                        <IconClock size={14} className="me-1" />
+                        {showHistory ? "Ocultar" : "Ver histórico"}
+                      </button>
+                    </div>
+                    {showHistory && (
+                      <div style={{ maxHeight: 150, overflowY: "auto", fontSize: 12 }}>
+                        {history.slice(0, 5).map((h) => (
+                          <div key={h.id} className="border-bottom pb-1 mb-1">
+                            <div className="d-flex align-items-center gap-2">
+                              <IconCheck size={12} className="text-success" />
+                              <span className="text-secondary">{new Date(h.sentAt).toLocaleString("pt-BR")}</span>
+                              <span className="badge bg-azure-lt">{h.sent} enviados</span>
+                            </div>
+                            <div className="text-truncate">{h.text}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
               <div className="modal-footer">
-                <button className="btn" onClick={() => setBlast(null)}>Cancelar</button>
-                <button className="btn btn-primary" disabled={blastSending} onClick={sendBlast}><IconSend size={16} className="me-1" />{blastSending ? "Enviando..." : "Disparar"}</button>
+                <button className="btn" onClick={() => setBlast(null)}>
+                  Cancelar
+                </button>
+                <button className="btn btn-primary" disabled={blastSending} onClick={sendBlast}>
+                  <IconSend size={16} className="me-1" />
+                  {blastSending ? "Enviando..." : "Disparar"}
+                </button>
               </div>
             </div>
           </div>

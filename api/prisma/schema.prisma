@@ -515,3 +515,44 @@ model BotSettings {
 
   @@map("bot_settings")
 }
+
+// ─────────────────────── Histórico de Broadcasts / Disparos ───────────────────────
+
+model BotBroadcast {
+  id          String   @id @default(uuid())
+  botUserId   String   // modelo que enviou
+  audience    String   // all | free | premium | online
+  messageType String   @default("text") // text | image
+  text        String?  // mensagem de texto
+  imageUrl    String?  // URL da imagem
+  targetedCount Int    @default(0) // quantos usuários foram selecionados
+  sentCount     Int    @default(0) // quantos realmente receberam
+  deliveredCount Int   @default(0) // quantos confirmaram recebimento (push delivered)
+  clickedCount   Int   @default(0) // quantos clicaram na notificação
+  createdAt      DateTime @default(now())
+  sentAt         DateTime? // quando foi disparado (null = agendado/rascunho)
+
+  @@index([botUserId])
+  @@index([createdAt])
+  @@map("bot_broadcasts")
+}
+
+// ─────────────────────── Campanhas de Notificação (push do painel) ───────────────────────
+
+model NotificationBroadcast {
+  id            String   @id @default(uuid())
+  title         String
+  body          String
+  audience      String   // all | premium | free | online | user
+  imageUrl      String?  // imagem opcional (upload ou URL externa)
+  actionType    String?  // null | internal | external
+  actionValue   String?  // rota interna (ex.: "chat") OU URL externa
+  targetedCount Int      @default(0) // quantos usuários foram selecionados
+  sentCount     Int      @default(0) // quantos registros criados (enviados)
+  deliveredCount Int     @default(0) // quantos tinham push (device token)
+  clickedCount   Int     @default(0) // quantos tocaram na notificação
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+  @@map("notification_broadcasts")
+}

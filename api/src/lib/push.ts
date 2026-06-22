@@ -92,6 +92,9 @@ async function sendToToken(
   data?: Record<string, string>
 ) {
   try {
+    const notification: Record<string, string> = { title, body };
+    // Imagem grande na notificação (Android exibe como big-picture).
+    if (data?.image) notification.image = data.image;
     const resp = await fetch(
       `https://fcm.googleapis.com/v1/projects/${FB_PROJECT_ID}/messages:send`,
       {
@@ -103,9 +106,12 @@ async function sendToToken(
         body: JSON.stringify({
           message: {
             token,
-            notification: { title, body },
+            notification,
             data: data ?? {},
-            android: { priority: "high" },
+            android: {
+              priority: "high",
+              notification: data?.image ? { image: data.image } : undefined,
+            },
           },
         }),
       }

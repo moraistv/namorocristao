@@ -43,3 +43,12 @@ export async function readNotification(req: Request, res: Response) {
   });
   res.json({ ok: true });
 }
+
+// POST /api/notifications/click  — registra que o usuário tocou numa push de campanha
+export async function trackNotificationClick(req: Request, res: Response) {
+  const { broadcastId } = z.object({ broadcastId: z.string().min(1) }).parse(req.body);
+  await prisma.notificationBroadcast
+    .update({ where: { id: broadcastId }, data: { clickedCount: { increment: 1 } } })
+    .catch(() => {}); // campanha pode não existir mais → ignora
+  res.json({ ok: true });
+}
