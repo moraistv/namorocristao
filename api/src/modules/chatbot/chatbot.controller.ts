@@ -4,6 +4,8 @@ import { z } from "zod";
 import { prisma } from "../../config/prisma";
 import { AppError } from "../../lib/errors";
 import { ageFromBirthday } from "../../lib/age";
+import { emitToUser } from "../../sockets";
+import { pushOnly } from "../../lib/push";
 
 const PERSONALITIES = ["ALL", "SHY", "FUNNY", "EXTROVERT"] as const;
 
@@ -258,4 +260,71 @@ export async function deleteBot(req: Request, res: Response) {
     prisma.user.delete({ where: { id: userId } }), // cascade apaga o profile
   ]);
   res.json({ ok: true });
+}
+
+// ───────────────────────── Disparo de Modelos (broadcast) ─────────────────────────
+
+const broadcastSchema = z.object({
+  text: z.string().min(1).max(500),
+  audience: z.enum(["all", "free", "premium", "online"]).default("all"),
+  limit: z.number().int().min(1).max(2000).optional(),
+});
+
+// POST /api/admin/bots/:userId/broadcast — o Modelo manda uma mensagem para vários usuários
+export async function broadcastFromBot(req: Request, res: Response) {
+  const botId = req.params.userId;
+  const bot = await prisma.user.findUnique({
+    where: { id: botId },
+    include: { profile: { select: { fullName: true } } },
+  });
+  if (!bot || !bot.isBot) throw new AppError("Modelo não encontrado", 404);
+
+  const { text, audience, limit } = broadcastSchema.parse(req.body);
+  const cap = limit ?? 500;
+  const now = new Date();
+
+  // Seleciona os usuários-alvo (reais, não banidos, não excluídos).
+  let targetIds: string[] = [];
+  if (audience === "online") {
+    const profs = await prisma.profile.findMany({
+      where: { isOnline: true, user: { isBot: false, isBanned: false, deletedAt: null } },
+      select: { userId: true },
+      take: cap,
+    });
+    targetIds = profs.map((p) => p.userId);
+  } else {
+    const where: any = { isBot: false, isBanned: false, deletedAt: null };
+    if (audience === "premium") where.OR = [{ isPremium: true }, { premiumUntil: { gt: now } }];
+    if (audience === "free") {
+      where.isPremium = false;
+      where.AND = [{ OR: [{ premiumUntil: null }, { premiumUntil: { lte: now } }] }];
+    }
+    const us = await prisma.user.findMany({ where, select: { id: true }, take: cap });
+    targetIds = us.map((u) => u.id);
+  }
+
+  const botName = bot.profile?.fullName ?? "Mensagem";
+  let sent = 0;
+  for (const uid of targetIds) {
+    if (uid === botId) continue;
+    const [a, b] = uid < botId ? [uid, botId] : [botId, uid];
+    const match = await prisma.match.upsert({
+      where: { userAId_userBId: { userAId: a, userBId: b } },
+      create: { userAId: a, userBId: b, isActive: true },
+      update: { isActive: true },
+    });
+    await prisma.interaction.upsert({
+      where: { fromUserId_toUserId: { fromUserId: botId, toUserId: uid } },
+      create: { fromUserId: botId, toUserId: uid, type: "LIKE" },
+      update: {},
+    });
+    const msg = await prisma.message.create({
+      data: { matchId: match.id, senderId: botId, type: "TEXT", content: text },
+    });
+    emitToUser(uid, "message:new", msg);
+    pushOnly(uid, botName, text.slice(0, 80), { matchId: match.id, type: "message" });
+    sent++;
+  }
+
+  res.json({ ok: true, sent });
 }

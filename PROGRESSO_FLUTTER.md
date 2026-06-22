@@ -1694,3 +1694,39 @@ Mapeia o backlog do que falta agregar no Namoro Cristão: **Modelos (perfis isca
 
 ## Validação
 - `flutter analyze` limpo; API `tsc` limpo. App rodando no celular (porta 38291). `/auth/google` com token falso → 401 (confirma env configurado).
+
+---
+
+# ✅ Módulo Chatbot + Bots de IA (22/06/2026)
+
+## Schema (migration 20260622010000_chatbot_bots — manual, aplicada via migrate deploy)
+- `User`: + `isBot`, `botPersonality` (enum BotPersonality: ALL/SHY/FUNNY/EXTROVERT), `botAiEnabled`.
+- `ChatbotRule`: category, personality, priority(0-10), keywords[], responses[], active. Bot sorteia resposta; aceita {name}{age}{city}.
+- `ChatbotLog`: userId, botUserId, message, matchedCategory (null=fallback), usedAi, createdAt — base do analytics.
+- `BotSettings` (singleton): aiEnabled, aiProvider, aiModel, aiApiKey, aiSystemPrompt, replyMinMs/replyMaxMs, fallbackText.
+
+## Backend
+- `chatbot.service.ts`: `matchRule` (keyword normalizado + prioridade + personalidade), `fillVars` ({name}{age}{city}), `callAi` (API compatível OpenAI), `triggerBotReply` (fire-and-forget: gera resposta regra→IA→fallback, mostra "digitando...", entrega via socket `message:new` + `pushOnly`, loga em ChatbotLog).
+- `chat.service.sendMessage`: ao enviar msg, se o destinatário é bot → `triggerBotReply`.
+- `match.service.swipe`: se o alvo é bot e é LIKE/SUPERLIKE → bot curte de volta → **match automático**.
+- `chatbot.controller.ts` + `chatbot.routes.ts` (montado em /api/admin):
+  - Regras: GET/POST/PUT/DELETE `/admin/chatbot/rules`.
+  - Analytics: GET `/admin/chatbot/analytics` (total, fallbacks, matchRate, topCategorias, fallbacks recentes).
+  - IA: GET/PUT `/admin/chatbot/settings` (chave nunca volta inteira; só `hasApiKey`).
+  - Bots/Modelos: GET/POST/PUT/DELETE `/admin/bots` (cria User isBot + Profile; delete limpa matches/msgs/interações).
+- `prisma/seedChatbot.ts`: 12 regras padrão (saudacao, como_vai, elogio x3 personalidades, idade, cidade, fe, intencao, interesses, despedida).
+
+## Painel
+- **Modelos** (`/modelos`): cards, criar/editar (nome, idade, gênero, cidade, bio, interesses, fotos com upload, personalidade, IA on/off), excluir, contador de matches.
+- **Regras do Bot** (`/chatbot/regras`): card de config de IA (provedor/modelo/chave/prompt/atrasos/fallback) + tabela de regras com criar/editar/excluir/ativar.
+- **Analytics Bot** (`/chatbot/analytics`): cards (interações, categorias, fallbacks, taxa de match), top categorias, lista de fallbacks.
+- Menu (Layout) + rotas (App) adicionados. `vite-env.d.ts` criado (tipos do import.meta.env).
+
+## Como funciona (fluxo)
+Admin cria um Modelo → aparece na descoberta → usuário curte → match automático → usuário manda msg → bot responde por regra (ou IA se ligada e nenhuma regra casar, senão fallback), com "digitando..." e push. Tudo logado pro analytics.
+
+## Pendência externa
+- Chave de IA (OpenAI) pra ligar resposta por IA — sem ela, usa regras + fallback (funciona).
+
+## Validação
+- API `tsc` limpo (após `prisma generate`); painel `tsc` limpo.

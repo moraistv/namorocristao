@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { IconPlus, IconEdit, IconTrash, IconRobot, IconHeart } from "@tabler/icons-react";
+import { IconPlus, IconEdit, IconTrash, IconRobot, IconHeart, IconSend } from "@tabler/icons-react";
 import { API_BASE, get, post, put, del } from "../api";
 import { Dialog, DialogConfig, Toast, ToastMsg } from "../components/ui";
 
@@ -40,6 +40,10 @@ export default function Bots() {
   const [bots, setBots] = useState<Bot[]>([]);
   const [form, setForm] = useState<Form | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [blast, setBlast] = useState<Bot | null>(null);
+  const [blastText, setBlastText] = useState("");
+  const [blastAudience, setBlastAudience] = useState("all");
+  const [blastSending, setBlastSending] = useState(false);
   const [dialog, setDialog] = useState<DialogConfig | null>(null);
   const [toast, setToast] = useState<ToastMsg | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -94,6 +98,18 @@ export default function Bots() {
     } catch (e: any) { setToast({ type: "error", text: e.message }); }
   }
 
+  async function sendBlast() {
+    if (!blast) return;
+    if (blastText.trim().length < 1) { setToast({ type: "error", text: "Escreva a mensagem" }); return; }
+    setBlastSending(true);
+    try {
+      const r = await post(`/admin/bots/${blast.userId}/broadcast`, { text: blastText.trim(), audience: blastAudience });
+      setBlast(null); setBlastText("");
+      setToast({ type: "success", text: `Disparado para ${r.sent} usuário(s)` });
+    } catch (e: any) { setToast({ type: "error", text: e.message }); }
+    finally { setBlastSending(false); }
+  }
+
   function remove(b: Bot) {
     setDialog({
       title: "Excluir modelo", message: `Remover ${b.fullName}? Apaga matches e conversas dele.`, icon: IconTrash, danger: true, confirmText: "Excluir",
@@ -131,6 +147,7 @@ export default function Bots() {
                 </div>
               </div>
               <div className="card-footer d-flex gap-1 justify-content-end">
+                <button className="btn btn-sm btn-ghost-primary" onClick={() => { setBlast(b); setBlastText(""); setBlastAudience("all"); }}><IconSend size={15} className="me-1" />Disparar</button>
                 <button className="btn btn-sm" onClick={() => openEdit(b)}><IconEdit size={15} className="me-1" />Editar</button>
                 <button className="btn btn-sm btn-ghost-danger" onClick={() => remove(b)}><IconTrash size={15} /></button>
               </div>
@@ -188,6 +205,32 @@ export default function Bots() {
 
       <Dialog config={dialog} onClose={() => setDialog(null)} />
       <Toast toast={toast} onClose={() => setToast(null)} />
+
+      {blast && (
+        <div className="modal modal-blur show d-block" tabIndex={-1} style={{ background: "rgba(0,0,0,.4)" }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content">
+              <div className="modal-header"><h5 className="modal-title">Disparar como {blast.fullName}</h5><button className="btn-close" onClick={() => setBlast(null)} /></div>
+              <div className="modal-body">
+                <p className="text-secondary" style={{ fontSize: 13 }}>A mensagem chega como se o Modelo tivesse mandado. Cria o match automaticamente e notifica (push) quem receber.</p>
+                <label className="form-label">Público</label>
+                <select className="form-select mb-3" value={blastAudience} onChange={(e) => setBlastAudience(e.target.value)}>
+                  <option value="all">Todos os usuários</option>
+                  <option value="free">Somente grátis (não-VIP)</option>
+                  <option value="premium">Somente VIP</option>
+                  <option value="online">Online agora</option>
+                </select>
+                <label className="form-label">Mensagem</label>
+                <textarea className="form-control" rows={3} value={blastText} onChange={(e) => setBlastText(e.target.value)} placeholder="Oi! Vi seu perfil e queria te conhecer melhor 😊" />
+              </div>
+              <div className="modal-footer">
+                <button className="btn" onClick={() => setBlast(null)}>Cancelar</button>
+                <button className="btn btn-primary" disabled={blastSending} onClick={sendBlast}><IconSend size={16} className="me-1" />{blastSending ? "Enviando..." : "Disparar"}</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }
