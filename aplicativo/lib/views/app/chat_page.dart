@@ -52,10 +52,34 @@ class _ChatPageState extends State<ChatPage> {
   String? _accessStatus; // null/PENDING/APPROVED/DENIED (acesso às fotos do outro)
   String get _myId => TokenStorage.userId ?? "";
 
+  // Sugestões de "quebra-gelo" (rotacionam pra não ficar mesmice).
+  final List<String> _allSuggestions = [
+    "Oi, tudo bem? 😊",
+    "Como está sendo seu dia?",
+    "Qual a sua igreja?",
+    "O que você curte fazer no fim de semana?",
+    "Qual seu versículo preferido? ✝️",
+    "Você gosta de louvor? 🎶",
+    "Bora tomar um café? ☕",
+    "Como você conheceu a Deus?",
+    "O que te trouxe aqui no app?",
+    "Prazer em te conhecer! 💛",
+    "Qual seu plano de fé pra esse ano?",
+    "Curte um culto ou mais um louvor em casa?",
+  ];
+  int _sugOffset = 0;
+  Timer? _sugTimer;
+
   @override
   void initState() {
     super.initState();
+    _allSuggestions.shuffle();
     _init();
+    // Rotaciona as 3 sugestões exibidas a cada 6s.
+    _sugTimer = Timer.periodic(const Duration(seconds: 6), (_) {
+      if (!mounted) return;
+      setState(() => _sugOffset = (_sugOffset + 3) % _allSuggestions.length);
+    });
   }
 
   Future<void> _init() async {
@@ -660,6 +684,7 @@ class _ChatPageState extends State<ChatPage> {
 
   @override
   void dispose() {
+    _sugTimer?.cancel();
     _presenceTimer?.cancel();
     _socket.leaveMatch(widget.matchId);
     _socket.disconnect();
@@ -803,10 +828,88 @@ class _ChatPageState extends State<ChatPage> {
                     },
                   ),
           ),
+          _suggestionsBar(),
           _inputBar(),
         ],
       ),
     );
+  }
+
+  // Mostra quebra-gelos rotativos enquanto a conversa ainda não tem mensagens reais.
+  bool get _showSuggestions =>
+      !_recording &&
+      !_hasText &&
+      !_messages.any((m) => m["type"] != "SYSTEM");
+
+  Widget _suggestionsBar() {
+    if (!_showSuggestions) return const SizedBox.shrink();
+    final shown = List.generate(
+        3, (i) => _allSuggestions[(_sugOffset + i) % _allSuggestions.length]);
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(left: 4, bottom: 6),
+            child: Row(
+              children: [
+                Icon(Icons.auto_awesome, size: 13, color: AppTheme.gold),
+                const SizedBox(width: 5),
+                const Text("Sugestões para começar",
+                    style: TextStyle(
+                        fontSize: 11.5,
+                        color: Color(0xFF9AA1B2),
+                        fontWeight: FontWeight.w600)),
+              ],
+            ),
+          ),
+          SizedBox(
+            height: 36,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 350),
+              child: ListView.separated(
+                key: ValueKey(_sugOffset),
+                scrollDirection: Axis.horizontal,
+                itemCount: shown.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (_, i) => _suggestionChip(shown[i]),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _suggestionChip(String text) {
+    return GestureDetector(
+      onTap: () => _pickSuggestion(text),
+      child: Container(
+        alignment: Alignment.center,
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        decoration: BoxDecoration(
+          color: AppTheme.gold.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: AppTheme.gold.withOpacity(0.45)),
+        ),
+        child: Text(text,
+            style: const TextStyle(
+                color: AppTheme.navy,
+                fontSize: 13,
+                fontWeight: FontWeight.w600)),
+      ),
+    );
+  }
+
+  // Deixa a mensagem pronta no campo (usuário pode editar e enviar).
+  void _pickSuggestion(String text) {
+    _controller.text = text;
+    _controller.selection =
+        TextSelection.fromPosition(TextPosition(offset: text.length));
+    setState(() => _hasText = true);
+    _focusNode.requestFocus();
   }
 
   Widget _bubble(Map<String, dynamic> m) {
@@ -821,22 +924,64 @@ class _ChatPageState extends State<ChatPage> {
       return _giftBubble(m, mine);
     }
     if (m["type"] == "SYSTEM") {
+      final content = m["content"].toString();
       return Center(
         child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 10),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          margin: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+          padding: const EdgeInsets.fromLTRB(20, 18, 20, 18),
+          constraints: const BoxConstraints(maxWidth: 320),
           decoration: BoxDecoration(
-            color: AppTheme.gold.withOpacity(0.15),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppTheme.gold.withOpacity(0.4)),
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                AppTheme.gold.withOpacity(0.18),
+                AppTheme.gold.withOpacity(0.06),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppTheme.gold.withOpacity(0.45)),
           ),
-          child: Text(
-            m["content"].toString(),
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-                color: AppTheme.navy,
-                fontSize: 13,
-                fontWeight: FontWeight.w600),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 52,
+                height: 52,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                      colors: [Color(0xFFE9C75A), Color(0xFFD4AF37)]),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                        color: AppTheme.gold.withOpacity(0.4),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3)),
+                  ],
+                ),
+                child: const Icon(Icons.favorite, color: Colors.white, size: 26),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                "Vocês deram match!",
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    color: AppTheme.navy,
+                    fontSize: 17,
+                    fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                content.contains("conversa")
+                    ? "Que tal começar a conversa? 💛"
+                    : content,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    color: Color(0xFF6A7286),
+                    fontSize: 13.5,
+                    height: 1.3),
+              ),
+            ],
           ),
         ),
       );

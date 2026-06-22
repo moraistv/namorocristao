@@ -153,6 +153,17 @@ class AppApi {
     return (j["verse"] as Map?)?.cast<String, dynamic>();
   }
 
+  /// Lista de versos ativos (público) — usada para rotacionar no app.
+  static Future<List<Map<String, dynamic>>> getVerses() async {
+    try {
+      final j = await _request("GET", "/config/verses");
+      final list = (j["verses"] as List?) ?? [];
+      return list.map((e) => (e as Map).cast<String, dynamic>()).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   /// Configuração de anúncios (AdMob) — pública, lida em tempo real.
   static Future<Map<String, dynamic>> getAdsConfig() async {
     return await _request("GET", "/config/ads") as Map<String, dynamic>;

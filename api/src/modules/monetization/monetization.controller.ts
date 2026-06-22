@@ -234,12 +234,32 @@ export async function deleteVerse(req: Request, res: Response) {
 
 // GET /api/config/verse — verso do dia (app, público). Rotaciona por dia.
 export async function publicDailyVerse(_req: Request, res: Response) {
+  const list = await getVerseList();
+  if (list === null) return res.json({ verse: null });
+
+  // Índice do dia do ano → rotaciona o verso diariamente.
+  const now = new Date();
+  const start = new Date(now.getFullYear(), 0, 0);
+  const dayOfYear = Math.floor((now.getTime() - start.getTime()) / 86400000);
+  const verse = list[dayOfYear % list.length];
+  res.json({ verse: { reference: verse.reference, text: verse.text } });
+}
+
+// GET /api/config/verses — lista completa de versos ativos (app rotaciona localmente)
+export async function publicVerses(_req: Request, res: Response) {
+  const list = await getVerseList();
+  if (list === null) return res.json({ verses: [] });
+  res.json({ verses: list.map((v) => ({ reference: v.reference, text: v.text })) });
+}
+
+// Lista de versos ativos (ou fallback embutido). null = recurso desativado.
+async function getVerseList(): Promise<{ reference: string; text: string }[] | null> {
   const settings = await prisma.appSettings.upsert({
     where: { id: 1 },
     create: { id: 1 },
     update: {},
   });
-  if (!settings.dailyVerseEnabled) return res.json({ verse: null });
+  if (!settings.dailyVerseEnabled) return null;
 
   const verses = await prisma.dailyVerse.findMany({
     where: { active: true },
@@ -256,14 +276,7 @@ export async function publicDailyVerse(_req: Request, res: Response) {
     { reference: "Eclesiastes 4:9", text: "É melhor ter companhia do que estar sozinho, porque maior é a recompensa do trabalho de duas pessoas." },
     { reference: "Colossenses 3:14", text: "Acima de tudo, porém, revistam-se do amor, que é o elo perfeito." },
   ];
-  const list = verses.length > 0 ? verses : fallback;
-
-  // Índice do dia do ano → rotaciona o verso diariamente.
-  const now = new Date();
-  const start = new Date(now.getFullYear(), 0, 0);
-  const dayOfYear = Math.floor((now.getTime() - start.getTime()) / 86400000);
-  const verse = list[dayOfYear % list.length];
-  res.json({ verse: { reference: verse.reference, text: verse.text } });
+  return verses.length > 0 ? verses.map((v) => ({ reference: v.reference, text: v.text })) : fallback;
 }
 
 // GET /api/config/store — planos, pacotes, presentes e valor do crédito (ativos)

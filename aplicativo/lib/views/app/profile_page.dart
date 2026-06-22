@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_easyloading/flutter_easyloading.dart';
@@ -24,8 +25,9 @@ class _ProfilePageState extends State<ProfilePage> {
   bool _isPremium = false;
   int _superLikes = 0;
   int _boosts = 0;
-  String? _verseRef;
-  String? _verseText;
+  List<Map<String, dynamic>> _verses = [];
+  int _verseIndex = 0;
+  Timer? _verseTimer;
 
   @override
   void initState() {
@@ -44,18 +46,28 @@ class _ProfilePageState extends State<ProfilePage> {
 
   @override
   void dispose() {
+    _verseTimer?.cancel();
     RealtimeBus.account.removeListener(_onAccountChanged);
     super.dispose();
   }
 
   Future<void> _loadVerse() async {
     try {
-      final v = await AppApi.getDailyVerse();
-      if (!mounted || v == null) return;
+      final list = await AppApi.getVerses();
+      if (!mounted || list.isEmpty) return;
+      list.shuffle(); // ordem aleatória a cada abertura (evita mesmice)
       setState(() {
-        _verseRef = v["reference"]?.toString();
-        _verseText = v["text"]?.toString();
+        _verses = list;
+        _verseIndex = 0;
       });
+      // Rotaciona o verso a cada 8s.
+      _verseTimer?.cancel();
+      if (list.length > 1) {
+        _verseTimer = Timer.periodic(const Duration(seconds: 8), (_) {
+          if (!mounted) return;
+          setState(() => _verseIndex = (_verseIndex + 1) % _verses.length);
+        });
+      }
     } catch (_) {}
   }
 
@@ -258,15 +270,19 @@ class _ProfilePageState extends State<ProfilePage> {
                   style: const TextStyle(color: Color(0xFF8A91A3), fontSize: 14)),
             ),
           const SizedBox(height: 22),
-          // Cards rápidos
+          // Cards rápidos (compactos)
           _quickCards(),
           const SizedBox(height: 18),
-          if (_verseText != null) ...[
+          // VIP em destaque (chama atenção) — só para não-assinantes
+          if (!_isPremium) ...[
+            _getPlusBanner(),
+            const SizedBox(height: 18),
+          ],
+          // Verso do dia (rotaciona) — logo abaixo do VIP
+          if (_verses.isNotEmpty) ...[
             _verseCard(),
             const SizedBox(height: 18),
           ],
-          if (!_isPremium) _getPlusBanner(),
-          if (!_isPremium) const SizedBox(height: 18),
           // Detalhes do perfil
           _details(p, interests),
           const SizedBox(height: 24),
@@ -393,9 +409,9 @@ class _ProfilePageState extends State<ProfilePage> {
           "$_superLikes Super Likes", _openStore),
       if (!_isPremium)
         _quickCard(Icons.workspace_premium, AppTheme.gold, "Assinar Plus",
-            _openPremium),
-      _quickCard(Icons.rocket_launch_rounded, const Color(0xFFEB5C7A),
-          "$_boosts Boosts", _openStore),
+            _openPremium)
+      else
+        _quickCard(Icons.storefront_rounded, AppTheme.gold, "Loja", _openStore),
     ];
     return Row(
       children: [
@@ -407,43 +423,45 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
+  // Card compacto (horizontal): ícone + texto + "+", ocupa menos espaço.
   Widget _quickCard(IconData icon, Color color, String label, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
+        padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 12),
         decoration: BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(color: const Color(0xFFEDEFF4)),
           boxShadow: [
             BoxShadow(
                 color: Colors.black.withOpacity(0.03),
-                blurRadius: 8,
-                offset: const Offset(0, 3)),
+                blurRadius: 6,
+                offset: const Offset(0, 2)),
           ],
         ),
-        child: Column(
+        child: Row(
           children: [
-            Icon(icon, color: color, size: 26),
-            const SizedBox(height: 8),
-            Text(label,
-                textAlign: TextAlign.center,
-                maxLines: 2,
-                style: const TextStyle(
-                    color: AppTheme.navy,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12)),
-            const SizedBox(height: 8),
             Container(
-              width: 26,
-              height: 26,
+              width: 34,
+              height: 34,
               decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: const Color(0xFFD7DCE6)),
+                color: color.withOpacity(0.14),
+                borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.add, color: Color(0xFF9AA1B2), size: 16),
+              child: Icon(icon, color: color, size: 20),
             ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: AppTheme.navy,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12.5)),
+            ),
+            const Icon(Icons.add, color: Color(0xFF9AA1B2), size: 18),
           ],
         ),
       ),
@@ -451,41 +469,64 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Widget _verseCard() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-      decoration: BoxDecoration(
-        color: AppTheme.gold.withOpacity(0.10),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppTheme.gold.withOpacity(0.30)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          const Text("✝️", style: TextStyle(fontSize: 14)),
-          const SizedBox(width: 9),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
+    final verse = _verses[_verseIndex % _verses.length];
+    final text = verse["text"]?.toString() ?? "";
+    final ref = verse["reference"]?.toString() ?? "";
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 450),
+      transitionBuilder: (child, anim) =>
+          FadeTransition(opacity: anim, child: child),
+      child: Container(
+        key: ValueKey(_verseIndex),
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              AppTheme.gold.withOpacity(0.16),
+              AppTheme.gold.withOpacity(0.06),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppTheme.gold.withOpacity(0.35)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
               children: [
-                Text(_verseText!,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                        fontSize: 11.5,
-                        color: AppTheme.navy,
-                        height: 1.25,
-                        fontStyle: FontStyle.italic)),
-                Text(_verseRef ?? "",
+                const Text("✝️", style: TextStyle(fontSize: 15)),
+                const SizedBox(width: 7),
+                Text("Versículo",
                     style: TextStyle(
-                        fontSize: 10,
+                        fontSize: 12,
                         fontWeight: FontWeight.bold,
+                        letterSpacing: 0.3,
                         color: AppTheme.gold.withOpacity(0.95))),
               ],
             ),
-          ),
-        ],
+            const SizedBox(height: 10),
+            // Texto completo (sem cortar), itálico.
+            Text(text,
+                style: const TextStyle(
+                    fontSize: 14.5,
+                    color: AppTheme.navy,
+                    height: 1.4,
+                    fontStyle: FontStyle.italic)),
+            const SizedBox(height: 8),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Text("— $ref",
+                  style: const TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.bold,
+                      color: AppTheme.navy)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -497,42 +538,90 @@ class _ProfilePageState extends State<ProfilePage> {
         width: double.infinity,
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          gradient:
-              const LinearGradient(colors: [AppTheme.navy, Color(0xFF1E2C5A)]),
-          borderRadius: BorderRadius.circular(18),
+          gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [AppTheme.navy, Color(0xFF1E2C5A)]),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: AppTheme.gold.withOpacity(0.55), width: 1.4),
+          boxShadow: [
+            BoxShadow(
+                color: AppTheme.gold.withOpacity(0.25),
+                blurRadius: 16,
+                offset: const Offset(0, 6)),
+          ],
         ),
         child: Column(
           children: [
-            const Text("Seja VIP",
-                style: TextStyle(
-                    color: Colors.white,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 18)),
-            const SizedBox(height: 6),
-            const Text(
-              "Curtidas ilimitadas, veja quem te curtiu e muito mais!",
-              textAlign: TextAlign.center,
-              style: TextStyle(color: Colors.white70, fontSize: 13),
+            // Cabeçalho com coroa em destaque
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                        colors: [Color(0xFFE9C75A), Color(0xFFD4AF37)]),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.workspace_premium,
+                      color: AppTheme.navy, size: 22),
+                ),
+                const SizedBox(width: 10),
+                const Text("Seja VIP",
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 22)),
+              ],
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
+            // Benefícios em destaque
+            _vipPerk(Icons.favorite, "Curtidas ilimitadas"),
+            _vipPerk(Icons.visibility, "Veja quem te curtiu"),
+            _vipPerk(Icons.star_rounded, "Mais Super Likes todo dia"),
+            const SizedBox(height: 16),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 11),
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 13),
+              alignment: Alignment.center,
               decoration: BoxDecoration(
                 gradient: const LinearGradient(
                     colors: [Color(0xFFE9C75A), Color(0xFFD4AF37)]),
-                borderRadius: BorderRadius.circular(24),
+                borderRadius: BorderRadius.circular(26),
+                boxShadow: [
+                  BoxShadow(
+                      color: AppTheme.gold.withOpacity(0.4),
+                      blurRadius: 10,
+                      offset: const Offset(0, 3)),
+                ],
               ),
               child: const Text("Assinar agora",
                   style: TextStyle(
                       color: AppTheme.navy,
                       fontWeight: FontWeight.bold,
-                      fontSize: 15)),
+                      fontSize: 16)),
             ),
           ],
         ),
       ),
     );
   }
+
+  Widget _vipPerk(IconData icon, String text) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 3),
+        child: Row(
+          children: [
+            Icon(icon, color: AppTheme.gold, size: 17),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(text,
+                  style: const TextStyle(color: Colors.white, fontSize: 13.5)),
+            ),
+            const Icon(Icons.check_circle, color: Color(0xFF6FCF8A), size: 16),
+          ],
+        ),
+      );
 
   Widget _details(Map<String, dynamic>? p, List<String> interests) {
     final about = p?["about"]?.toString() ?? "";

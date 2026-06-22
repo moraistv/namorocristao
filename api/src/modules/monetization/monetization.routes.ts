@@ -34,3 +34,4 @@ export const configPublicRouter = Router();
 configPublicRouter.get("/store", asyncHandler(c.publicStore));
 configPublicRouter.get("/ads", asyncHandler(c.publicAds));
 configPublicRouter.get("/verse", asyncHandler(c.publicDailyVerse));
+configPublicRouter.get("/verses", asyncHandler(c.publicVerses));
