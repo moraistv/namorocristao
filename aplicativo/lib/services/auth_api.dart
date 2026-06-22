@@ -106,4 +106,10 @@ class AuthApi {
     });
     return _persist(_toResult(json));
   }
+
+  /// Login/cadastro via Google (envia o idToken do Google para a nossa API).
+  static Future<AuthResult> loginWithGoogle(String idToken) async {
+    final json = await _post("/auth/google", {"idToken": idToken});
+    return _persist(_toResult(json));
+  }
 }

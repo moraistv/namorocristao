@@ -3,13 +3,17 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_easyloading/flutter_easyloading.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_sign_in/google_sign_in.dart';
 import 'package:mioamoreapp/config/config.dart';
+import 'package:mioamoreapp/config/api_config.dart';
 import 'package:mioamoreapp/helpers/constants.dart';
 import 'package:mioamoreapp/models/country_code.dart';
-import 'package:mioamoreapp/providers/auth_providers.dart';
 import 'package:mioamoreapp/providers/country_codes_provider.dart';
 import 'package:mioamoreapp/providers/get_current_location_provider.dart';
 import 'package:mioamoreapp/providers/version_provider.dart';
+import 'package:mioamoreapp/services/auth_api.dart';
+import 'package:mioamoreapp/views/app/main_shell.dart';
+import 'package:mioamoreapp/views/app/onboarding_page.dart';
 import 'package:mioamoreapp/views/auth/email_auth_page.dart';
 import 'package:mioamoreapp/views/auth/login_with_phone_page.dart';
 import 'package:mioamoreapp/views/auth/people_orbit.dart';
@@ -20,6 +24,46 @@ import 'package:mioamoreapp/views/others/loading_page.dart';
 
 class LoginPage extends ConsumerWidget {
   const LoginPage({super.key});
+
+  Future<void> _signInWithGoogle(BuildContext context) async {
+    try {
+      final gsi = GoogleSignIn(
+        scopes: const ["email", "profile"],
+        serverClientId: ApiConfig.googleServerClientId.isEmpty
+            ? null
+            : ApiConfig.googleServerClientId,
+      );
+      // Garante seletor de conta limpo.
+      await gsi.signOut();
+      final account = await gsi.signIn();
+      if (account == null) return; // usuário cancelou
+      EasyLoading.show(status: "Entrando...");
+      final auth = await account.authentication;
+      final idToken = auth.idToken;
+      if (idToken == null || idToken.isEmpty) {
+        EasyLoading.dismiss();
+        EasyLoading.showError("Não foi possível obter o token do Google.");
+        return;
+      }
+      final result = await AuthApi.loginWithGoogle(idToken);
+      EasyLoading.dismiss();
+      if (!context.mounted) return;
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(
+          builder: (_) =>
+              result.hasProfile ? const MainShell() : const OnboardingPage(),
+        ),
+        (route) => false,
+      );
+    } on AuthApiException catch (e) {
+      EasyLoading.dismiss();
+      EasyLoading.showError(e.message);
+    } catch (e) {
+      EasyLoading.dismiss();
+      EasyLoading.showError("Falha no login com Google.");
+    }
+  }
 
   @override
   Widget build(BuildContext context, ref) {
@@ -68,16 +112,7 @@ class LoginPage extends ConsumerWidget {
                 LoginButton(
                   icon: Image.asset(googleLogo,
                       width: AppConstants.defaultNumericValue * 2),
-                  onPressed: () async {
-                    if (!kBackendReady) {
-                      EasyLoading.showInfo(
-                          'Login chega na próxima fase (API da VPS).');
-                      return;
-                    }
-                    EasyLoading.show(status: 'Logging in...');
-                    await ref.read(authProvider).signInWithGoogle();
-                    EasyLoading.dismiss();
-                  },
+                  onPressed: () => _signInWithGoogle(context),
                   text: "Entrar com Google",
                 ),
               if (isGoogleAuthAvailable)
