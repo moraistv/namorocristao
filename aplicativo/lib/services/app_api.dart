@@ -265,8 +265,9 @@ class AppApi {
   }
 
   // ── Chat (REST; tempo real via socket) ──
-  static Future<List<dynamic>> getHistory(String matchId) async {
-    final j = await _request("GET", "/matches/$matchId/messages");
+  static Future<List<dynamic>> getHistory(String matchId, {String? after}) async {
+    final q = after != null ? "?after=${Uri.encodeComponent(after)}" : "";
+    final j = await _request("GET", "/matches/$matchId/messages$q");
     return (j["messages"] as List<dynamic>?) ?? [];
   }
 

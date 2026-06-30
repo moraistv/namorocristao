@@ -208,7 +208,7 @@ model Message {
   readAt    DateTime?
   createdAt DateTime    @default(now())
 
-  @@index([matchId])
+  @@index([matchId, createdAt])
   @@map("messages")
 }
 

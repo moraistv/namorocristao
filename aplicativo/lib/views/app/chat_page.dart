@@ -163,11 +163,15 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
-  // Busca novas mensagens via REST (fallback de tempo real).
+  // Busca novas mensagens via REST (fallback de tempo real). Incremental: só
+  // pega o que chegou depois da última mensagem que já temos (payload mínimo).
   Future<void> _poll() async {
     try {
-      final hist = await AppApi.getHistory(widget.matchId);
+      final String? after =
+          _messages.isNotEmpty ? _messages.last["createdAt"]?.toString() : null;
+      final hist = await AppApi.getHistory(widget.matchId, after: after);
       final list = hist.cast<Map<String, dynamic>>();
+      if (list.isEmpty) return;
       bool added = false;
       for (final m in list) {
         final id = m["id"]?.toString();

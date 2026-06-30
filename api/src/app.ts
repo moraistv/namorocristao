@@ -1,6 +1,7 @@
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
+import compression from "compression";
 import { env } from "./config/env";
 import { UPLOADS_DIR } from "./config/paths";
 import { router } from "./routes";
@@ -12,6 +13,7 @@ export function createApp() {
   app.set("trust proxy", true);
 
   app.use(helmet({ crossOriginResourcePolicy: false }));
+  app.use(compression()); // gzip nas respostas — mais rápido em rede móvel
   app.use(
     cors({
       origin: env.corsOrigins.length ? env.corsOrigins : true,

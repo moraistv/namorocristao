@@ -117,9 +117,19 @@ export async function sendGift(params: { senderId: string; matchId: string; gift
 export async function getHistory(
   userId: string,
   matchId: string,
-  opts: { limit?: number; before?: string }
+  opts: { limit?: number; before?: string; after?: string }
 ) {
   await assertMembership(userId, matchId);
+
+  // Busca incremental: só mensagens mais novas que `after` (usado no polling).
+  if (opts.after) {
+    const after = new Date(opts.after);
+    return prisma.message.findMany({
+      where: { matchId, createdAt: { gt: after } },
+      orderBy: { createdAt: "asc" },
+      take: 50,
+    });
+  }
 
   const limit = Math.min(Math.max(opts.limit ?? 30, 1), 100);
   const messages = await prisma.message.findMany({

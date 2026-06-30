@@ -2,14 +2,16 @@ import { Request, Response } from "express";
 import * as service from "./chat.service";
 import { emitToUser } from "../../sockets";
 
-// GET /api/matches/:matchId/messages?limit=&before=
+// GET /api/matches/:matchId/messages?limit=&before=&after=
 export async function history(req: Request, res: Response) {
   const { matchId } = req.params;
   const limit = req.query.limit ? Number(req.query.limit) : undefined;
   const before = req.query.before ? String(req.query.before) : undefined;
+  const after = req.query.after ? String(req.query.after) : undefined;
   const messages = await service.getHistory(req.userId!, matchId, {
     limit,
     before,
+    after,
   });
   res.json({ messages });
 }

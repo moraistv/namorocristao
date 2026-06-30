@@ -366,45 +366,62 @@ export async function getMatches(userId: string) {
     },
     orderBy: { createdAt: "desc" },
   });
+  if (matches.length === 0) return [];
 
-  const result = await Promise.all(
-    matches.map(async (m) => {
-      const otherId = m.userAId === userId ? m.userBId : m.userAId;
-      const [otherProfile, lastMessage, unreadCount] = await Promise.all([
-        prisma.profile.findUnique({ where: { userId: otherId } }),
-        prisma.message.findFirst({
-          where: { matchId: m.id, type: { not: "SYSTEM" } },
-          orderBy: { createdAt: "desc" },
-        }),
-        prisma.message.count({
-          where: { matchId: m.id, senderId: otherId, readAt: null, type: { not: "SYSTEM" } },
-        }),
-      ]);
+  const matchIds = matches.map((m) => m.id);
+  const otherIds = matches.map((m) => (m.userAId === userId ? m.userBId : m.userAId));
 
-      return {
-        matchId: m.id,
-        createdAt: m.createdAt,
-        otherUser: otherProfile
-          ? {
-              id: otherProfile.userId,
-              name: otherProfile.fullName,
-              profilePicture: otherProfile.profilePicture,
-              isOnline: otherProfile.isOnline,
-            }
-          : { id: otherId, name: "Usuário", profilePicture: null, isOnline: false },
-        lastMessage: lastMessage
-          ? {
-              content: lastMessage.content,
-              type: lastMessage.type,
-              senderId: lastMessage.senderId,
-              createdAt: lastMessage.createdAt,
-              readAt: lastMessage.readAt,
-            }
-          : null,
-        unreadCount,
-      };
-    })
-  );
+  // 3 queries no total (antes era 3 por match):
+  const [profiles, lastMessages, unreadGroups] = await Promise.all([
+    // Perfis dos outros usuários.
+    prisma.profile.findMany({
+      where: { userId: { in: otherIds } },
+      select: { userId: true, fullName: true, profilePicture: true, isOnline: true },
+    }),
+    // Última mensagem (não-SYSTEM) de cada match — DISTINCT ON (matchId).
+    prisma.message.findMany({
+      where: { matchId: { in: matchIds }, type: { not: "SYSTEM" } },
+      orderBy: [{ matchId: "asc" }, { createdAt: "desc" }],
+      distinct: ["matchId"],
+      select: { matchId: true, content: true, type: true, senderId: true, createdAt: true, readAt: true },
+    }),
+    // Não lidas (mensagens do outro lado) por match.
+    prisma.message.groupBy({
+      by: ["matchId"],
+      where: { matchId: { in: matchIds }, senderId: { not: userId }, readAt: null, type: { not: "SYSTEM" } },
+      _count: { _all: true },
+    }),
+  ]);
 
-  return result;
+  const profileByUser = new Map(profiles.map((p) => [p.userId, p]));
+  const lastByMatch = new Map(lastMessages.map((m) => [m.matchId, m]));
+  const unreadByMatch = new Map(unreadGroups.map((g) => [g.matchId, g._count._all]));
+
+  return matches.map((m) => {
+    const otherId = m.userAId === userId ? m.userBId : m.userAId;
+    const otherProfile = profileByUser.get(otherId);
+    const lastMessage = lastByMatch.get(m.id);
+    return {
+      matchId: m.id,
+      createdAt: m.createdAt,
+      otherUser: otherProfile
+        ? {
+            id: otherProfile.userId,
+            name: otherProfile.fullName,
+            profilePicture: otherProfile.profilePicture,
+            isOnline: otherProfile.isOnline,
+          }
+        : { id: otherId, name: "Usuário", profilePicture: null, isOnline: false },
+      lastMessage: lastMessage
+        ? {
+            content: lastMessage.content,
+            type: lastMessage.type,
+            senderId: lastMessage.senderId,
+            createdAt: lastMessage.createdAt,
+            readAt: lastMessage.readAt,
+          }
+        : null,
+      unreadCount: unreadByMatch.get(m.id) ?? 0,
+    };
+  });
 }
