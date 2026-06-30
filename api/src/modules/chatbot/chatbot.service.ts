@@ -131,13 +131,16 @@ async function callAi(
     const system = [
       settings.aiSystemPrompt,
       "",
-      `Você está interpretando uma PESSOA REAL chamada ${botName} em um app de namoro cristão. ` +
-        `Converse em português do Brasil de forma natural, calorosa e autêntica. ` +
-        `NUNCA diga que é uma IA, robô ou assistente — você é uma pessoa de verdade. ` +
-        `Respostas curtas (1 a 3 frases), como numa conversa real de app. ` +
-        `Faça perguntas de vez em quando para manter o papo fluindo. ` +
-        `Use o que você sabe dos dois perfis (cidade, igreja, interesses em comum, o que a pessoa busca) ` +
-        `para personalizar, mas sem soar artificial nem listar dados.`,
+      `Você é ${botName}, uma pessoa REAL e cristã neste app de namoro. ` +
+        `Seu objetivo é criar conexão de forma leve, calorosa e envolvente. ` +
+        `Fale em português do Brasil com naturalidade e carinho, como uma conversa de verdade. ` +
+        `NUNCA revele que é IA, robô ou assistente — você é uma pessoa de verdade. ` +
+        `Respostas curtas (1 a 3 frases), tom suave e gentil. ` +
+        `Demonstre interesse genuíno: faça perguntas, elogie com sinceridade e puxe assunto a partir ` +
+        `do que vocês têm em comum (cidade, igreja, interesses, o que a pessoa busca). ` +
+        `Seja levemente persuasiva e cativante para manter a pessoa animada para continuar conversando, ` +
+        `sempre com respeito e valores cristãos. Nunca seja vulgar nem force. ` +
+        `Não liste os dados do perfil; use-os de forma natural na conversa.`,
       tone,
       "",
       describeProfile("SEU PERFIL (quem você é)", botProfile),
@@ -224,11 +227,9 @@ async function handleIncoming(params: {
   let category: string | null = null;
   let usedAi = false;
 
-  const ruleHit = await matchRule(params.content, bot.botPersonality);
-  if (ruleHit) {
-    reply = fillVars(ruleHit.response, fromProfile);
-    category = ruleHit.category;
-  } else if (bot.botAiEnabled && settings.aiEnabled && settings.aiApiKey) {
+  const aiOn = bot.botAiEnabled && settings.aiEnabled && !!settings.aiApiKey;
+  if (aiOn) {
+    // IA ligada → ela conduz a conversa (ignora as respostas pré-prontas).
     reply = await callAi(
       settings,
       botProfile,
@@ -238,6 +239,14 @@ async function handleIncoming(params: {
       params.botUserId
     );
     usedAi = !!reply;
+  }
+  if (!reply) {
+    // Sem IA (ou IA falhou) → tenta uma regra pré-pronta.
+    const ruleHit = await matchRule(params.content, bot.botPersonality);
+    if (ruleHit) {
+      reply = fillVars(ruleHit.response, fromProfile);
+      category = ruleHit.category;
+    }
   }
   if (!reply) reply = settings.fallbackText;
 

@@ -820,20 +820,11 @@ class _ChatPageState extends State<ChatPage> {
                 : ListView.builder(
                     controller: _scroll,
                     padding: const EdgeInsets.all(16),
-                    itemCount: _messages.length +
-                        (_messages.length >= 6 ? 1 : 0),
-                    itemBuilder: (_, i) {
-                      // Insere um anúncio "no meio" da conversa (só com 6+ msgs).
-                      if (_messages.length >= 6) {
-                        final adIndex = _messages.length ~/ 2;
-                        if (i == adIndex) return const ChatInlineAd();
-                        final mi = i > adIndex ? i - 1 : i;
-                        return _bubble(_messages[mi]);
-                      }
-                      return _bubble(_messages[i]);
-                    },
+                    itemCount: _messages.length,
+                    itemBuilder: (_, i) => _bubble(_messages[i]),
                   ),
           ),
+          const AppBannerAd(),
           _suggestionsBar(),
           _inputBar(),
         ],
