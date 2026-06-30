@@ -51,36 +51,109 @@ function fillVars(
 }
 
 /** Chama a IA (API compatível com OpenAI). Retorna null se falhar/sem chave. */
+/** Endpoint compatível com OpenAI conforme o provedor configurado. */
+function aiEndpoint(provider: string | null): string {
+  const p = (provider || "").toLowerCase().trim();
+  if (p.includes("deepseek")) return "https://api.deepseek.com/v1/chat/completions";
+  if (p.startsWith("http")) return p; // permite URL custom completa
+  return "https://api.openai.com/v1/chat/completions";
+}
+
+const GENDER_PT: Record<string, string> = {
+  MALE: "Homem",
+  FEMALE: "Mulher",
+  OTHER: "Outro",
+};
+
+const PERSONALITY_TONE: Record<string, string> = {
+  SHY: "Seu jeito é tímido e reservado: respostas mais curtas, doces e um pouco contidas.",
+  FUNNY: "Seu jeito é bem-humorado e descontraído: leveza e bom humor, sem exagero.",
+  EXTROVERT: "Seu jeito é extrovertido e caloroso: puxa assunto e demonstra interesse.",
+  ALL: "Tom natural, simpático e acolhedor.",
+};
+
+/** Descreve um perfil completo em texto, para dar contexto à IA. */
+function describeProfile(
+  label: string,
+  p: {
+    fullName: string;
+    gender: string | null;
+    birthday: Date;
+    city: string | null;
+    denomination: string | null;
+    churchFrequency: string | null;
+    intention: string | null;
+    interests: string[];
+    about: string | null;
+  } | null
+): string {
+  if (!p) return `${label}: (sem dados)`;
+  const lines: string[] = [];
+  lines.push(`Nome: ${p.fullName.split(" ")[0]}`);
+  const age = ageFromBirthday(p.birthday);
+  if (age) lines.push(`Idade: ${age}`);
+  if (p.gender && GENDER_PT[p.gender]) lines.push(`Gênero: ${GENDER_PT[p.gender]}`);
+  if (p.city) lines.push(`Cidade: ${p.city}`);
+  if (p.denomination) lines.push(`Denominação: ${p.denomination}`);
+  if (p.churchFrequency) lines.push(`Frequência à igreja: ${p.churchFrequency}`);
+  if (p.intention) lines.push(`O que busca: ${p.intention}`);
+  if (p.interests?.length) lines.push(`Interesses: ${p.interests.join(", ")}`);
+  if (p.about) lines.push(`Sobre: ${p.about}`);
+  return `${label}:\n- ${lines.join("\n- ")}`;
+}
+
 async function callAi(
-  settings: { aiApiKey: string | null; aiModel: string; aiSystemPrompt: string },
-  botProfile: { fullName: string; about: string | null } | null,
+  settings: {
+    aiApiKey: string | null;
+    aiModel: string;
+    aiSystemPrompt: string;
+    aiProvider: string | null;
+  },
+  botProfile: any | null,
+  fromProfile: any | null,
+  personality: BotPersonality | null,
   matchId: string,
   botUserId: string
 ): Promise<string | null> {
   if (!settings.aiApiKey) return null;
   try {
+    // Histórico COMPLETO da conversa (texto), em ordem cronológica.
     const history = await prisma.message.findMany({
       where: { matchId, type: "TEXT" },
       orderBy: { createdAt: "desc" },
-      take: 8,
+      take: 60,
     });
     history.reverse();
 
-    const persona = botProfile
-      ? ` Voce esta interpretando ${botProfile.fullName}.${
-          botProfile.about ? " Bio: " + botProfile.about : ""
-        } Nunca diga que e um robo ou IA. Responda em 1-2 frases curtas.`
-      : "";
+    const botName = botProfile?.fullName?.split(" ")[0] ?? "você";
+    const tone = PERSONALITY_TONE[personality ?? "ALL"] ?? PERSONALITY_TONE.ALL;
+
+    const system = [
+      settings.aiSystemPrompt,
+      "",
+      `Você está interpretando uma PESSOA REAL chamada ${botName} em um app de namoro cristão. ` +
+        `Converse em português do Brasil de forma natural, calorosa e autêntica. ` +
+        `NUNCA diga que é uma IA, robô ou assistente — você é uma pessoa de verdade. ` +
+        `Respostas curtas (1 a 3 frases), como numa conversa real de app. ` +
+        `Faça perguntas de vez em quando para manter o papo fluindo. ` +
+        `Use o que você sabe dos dois perfis (cidade, igreja, interesses em comum, o que a pessoa busca) ` +
+        `para personalizar, mas sem soar artificial nem listar dados.`,
+      tone,
+      "",
+      describeProfile("SEU PERFIL (quem você é)", botProfile),
+      "",
+      describeProfile("PERFIL DE QUEM VOCÊ ESTÁ CONVERSANDO", fromProfile),
+    ].join("\n");
 
     const messages = [
-      { role: "system", content: settings.aiSystemPrompt + persona },
+      { role: "system", content: system },
       ...history.map((m) => ({
         role: m.senderId === botUserId ? "assistant" : "user",
         content: m.content,
       })),
     ];
 
-    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+    const resp = await fetch(aiEndpoint(settings.aiProvider), {
       method: "POST",
       headers: {
         Authorization: `Bearer ${settings.aiApiKey}`,
@@ -89,7 +162,7 @@ async function callAi(
       body: JSON.stringify({
         model: settings.aiModel,
         messages,
-        max_tokens: 120,
+        max_tokens: 200,
         temperature: 0.9,
       }),
     });
@@ -156,7 +229,14 @@ async function handleIncoming(params: {
     reply = fillVars(ruleHit.response, fromProfile);
     category = ruleHit.category;
   } else if (bot.botAiEnabled && settings.aiEnabled && settings.aiApiKey) {
-    reply = await callAi(settings, botProfile, params.matchId, params.botUserId);
+    reply = await callAi(
+      settings,
+      botProfile,
+      fromProfile,
+      bot.botPersonality,
+      params.matchId,
+      params.botUserId
+    );
     usedAi = !!reply;
   }
   if (!reply) reply = settings.fallbackText;

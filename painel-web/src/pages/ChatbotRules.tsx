@@ -122,8 +122,19 @@ export default function ChatbotRules() {
                   <span className="form-check-label">IA ativada</span>
                 </label>
               </div>
-              <div className="col-md-3"><label className="form-label">Provedor</label><input className="form-control" value={settings.aiProvider} onChange={(e) => setSettings({ ...settings, aiProvider: e.target.value })} /></div>
-              <div className="col-md-3"><label className="form-label">Modelo</label><input className="form-control" value={settings.aiModel} onChange={(e) => setSettings({ ...settings, aiModel: e.target.value })} /></div>
+              <div className="col-md-3">
+                <label className="form-label">Provedor</label>
+                <select className="form-select" value={settings.aiProvider} onChange={(e) => {
+                  const prov = e.target.value;
+                  // Sugere o modelo padrão ao trocar de provedor.
+                  const model = prov === "deepseek" ? "deepseek-chat" : prov === "openai" ? "gpt-4o-mini" : settings.aiModel;
+                  setSettings({ ...settings, aiProvider: prov, aiModel: model });
+                }}>
+                  <option value="deepseek">DeepSeek</option>
+                  <option value="openai">OpenAI</option>
+                </select>
+              </div>
+              <div className="col-md-3"><label className="form-label">Modelo</label><input className="form-control" value={settings.aiModel} onChange={(e) => setSettings({ ...settings, aiModel: e.target.value })} placeholder="deepseek-chat" /><small className="text-secondary">DeepSeek: deepseek-chat (mais inteligente) ou deepseek-reasoner</small></div>
               <div className="col-md-3"><label className="form-label">API Key {settings.hasApiKey && <span className="badge bg-green-lt ms-1">salva</span>}</label><input className="form-control" type="password" placeholder={settings.hasApiKey ? "•••• (mantém atual)" : "cole a chave"} value={apiKey} onChange={(e) => setApiKey(e.target.value)} /></div>
               <div className="col-12"><label className="form-label">Instrução base (system prompt)</label><textarea className="form-control" rows={2} value={settings.aiSystemPrompt} onChange={(e) => setSettings({ ...settings, aiSystemPrompt: e.target.value })} /></div>
               <div className="col-md-3"><label className="form-label">Atraso mín (ms)</label><input type="number" className="form-control" value={settings.replyMinMs} onChange={(e) => setSettings({ ...settings, replyMinMs: +e.target.value })} /></div>
