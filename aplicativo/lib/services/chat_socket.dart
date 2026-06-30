@@ -24,8 +24,8 @@ class ChatSocket {
     final socket = io.io(
       _origin,
       io.OptionBuilder()
-          // polling conecta primeiro (compatível com proxy/CDN) e sobe p/ websocket.
-          .setTransports(["polling", "websocket"])
+          // websocket no path /api/socket.io/ (curl confirmou upgrade 101).
+          .setTransports(["websocket"])
           .setPath("/api/socket.io/")
           .disableAutoConnect()
           .enableForceNew()

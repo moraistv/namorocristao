@@ -69,6 +69,9 @@ class _ChatPageState extends State<ChatPage> {
   ];
   int _sugOffset = 0;
   Timer? _sugTimer;
+  Timer? _pollTimer;
+  Timer? _localTypingTimer;
+  bool _localTyping = false;
 
   @override
   void initState() {
@@ -96,12 +99,17 @@ class _ChatPageState extends State<ChatPage> {
     _refreshPresence();
     _presenceTimer =
         Timer.periodic(const Duration(seconds: 30), (_) => _refreshPresence());
+    // Fallback confiável de tempo real: busca novas mensagens via REST a cada 2,5s
+    // (garante ver a resposta do bot/pessoa mesmo se o socket não conectar).
+    _pollTimer =
+        Timer.periodic(const Duration(milliseconds: 2500), (_) => _poll());
 
     _socket.connect(
       onMessage: (msg) {
         if (msg["matchId"] == widget.matchId) {
           _addMessage(msg);
           if (msg["senderId"] != _myId) {
+            _clearLocalTyping();
             _socket.markRead(widget.matchId);
             AppApi.markRead(widget.matchId); // confiável (REST), inclusive p/ bot
           }
@@ -149,9 +157,49 @@ class _ChatPageState extends State<ChatPage> {
     try {
       final msg = await AppApi.sendMessage(widget.matchId, text);
       _addMessage(msg);
+      _startLocalTyping(); // mostra "digitando..." enquanto a resposta vem
     } catch (_) {
       EasyLoading.showError("Falha ao enviar");
     }
+  }
+
+  // Busca novas mensagens via REST (fallback de tempo real).
+  Future<void> _poll() async {
+    try {
+      final hist = await AppApi.getHistory(widget.matchId);
+      final list = hist.cast<Map<String, dynamic>>();
+      bool added = false;
+      for (final m in list) {
+        final id = m["id"]?.toString();
+        if (id == null) continue;
+        if (_messages.any((x) => x["id"]?.toString() == id)) continue;
+        _messages.add(m);
+        added = true;
+        if (m["senderId"] != _myId) {
+          _clearLocalTyping();
+          AppApi.markRead(widget.matchId);
+        }
+      }
+      if (added && mounted) {
+        setState(() {});
+        _scrollToBottom();
+      }
+    } catch (_) {}
+  }
+
+  // "Digitando..." otimista após eu enviar (a resposta — ex.: do bot — vem logo).
+  void _startLocalTyping() {
+    _localTypingTimer?.cancel();
+    if (mounted) setState(() => _localTyping = true);
+    _scrollToBottom();
+    _localTypingTimer = Timer(const Duration(seconds: 8), () {
+      if (mounted) setState(() => _localTyping = false);
+    });
+  }
+
+  void _clearLocalTyping() {
+    _localTypingTimer?.cancel();
+    if (_localTyping && mounted) setState(() => _localTyping = false);
   }
 
   Future<void> _sendPhoto(ImageSource source) async {
@@ -691,6 +739,8 @@ class _ChatPageState extends State<ChatPage> {
   @override
   void dispose() {
     _sugTimer?.cancel();
+    _pollTimer?.cancel();
+    _localTypingTimer?.cancel();
     _presenceTimer?.cancel();
     _socket.leaveMatch(widget.matchId);
     _socket.disconnect();
@@ -820,8 +870,15 @@ class _ChatPageState extends State<ChatPage> {
                 : ListView.builder(
                     controller: _scroll,
                     padding: const EdgeInsets.all(16),
-                    itemCount: _messages.length,
-                    itemBuilder: (_, i) => _bubble(_messages[i]),
+                    itemCount: _messages.length +
+                        ((_otherTyping || _localTyping) ? 1 : 0),
+                    itemBuilder: (_, i) {
+                      if ((_otherTyping || _localTyping) &&
+                          i == _messages.length) {
+                        return const TypingBubble();
+                      }
+                      return _bubble(_messages[i]);
+                    },
                   ),
           ),
           const AppBannerAd(),
@@ -1442,6 +1499,79 @@ class _ChatPageState extends State<ChatPage> {
                     ))
                 .toList(),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+
+/// Bolha de "digitando..." com 3 bolinhas animadas (estilo WhatsApp).
+class TypingBubble extends StatefulWidget {
+  const TypingBubble({super.key});
+
+  @override
+  State<TypingBubble> createState() => _TypingBubbleState();
+}
+
+class _TypingBubbleState extends State<TypingBubble>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  )..repeat();
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: const BorderRadius.only(
+            topLeft: Radius.circular(18),
+            topRight: Radius.circular(18),
+            bottomLeft: Radius.circular(4),
+            bottomRight: Radius.circular(18),
+          ),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 4),
+          ],
+        ),
+        child: AnimatedBuilder(
+          animation: _c,
+          builder: (_, __) {
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: List.generate(3, (i) {
+                // Cada bolinha "pula" com um pequeno atraso entre elas.
+                final t = (_c.value - i * 0.2) % 1.0;
+                final scale = t < 0.5 ? 0.6 + (t * 2) * 0.6 : 0.6 + (2 - t * 2) * 0.6;
+                return Padding(
+                  padding: EdgeInsets.only(right: i == 2 ? 0 : 5),
+                  child: Transform.scale(
+                    scale: scale.clamp(0.6, 1.2),
+                    child: Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: AppTheme.gold.withOpacity(0.85),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
+                );
+              }),
+            );
+          },
         ),
       ),
     );
