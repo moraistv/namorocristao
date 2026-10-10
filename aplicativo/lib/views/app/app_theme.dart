@@ -41,8 +41,7 @@ class AppTheme {
         elevation: 0,
         padding: const EdgeInsets.symmetric(vertical: 15),
         textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(rMd)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(rMd)),
       );
 
   static ButtonStyle get secondaryButton => OutlinedButton.styleFrom(
@@ -50,8 +49,7 @@ class AppTheme {
         side: const BorderSide(color: border),
         padding: const EdgeInsets.symmetric(vertical: 15),
         textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(rMd)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(rMd)),
       );
 }
 
@@ -162,7 +160,6 @@ class AppChoiceChip extends StatelessWidget {
     );
   }
 }
-
 
 const kDenominations = [
   "Batista",

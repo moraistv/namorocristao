@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:mioamoreapp/services/public_url.dart';
 import 'package:mioamoreapp/views/app/app_theme.dart';
 
 /// Exibe o perfil completo de uma pessoa (fotos + infos).
@@ -30,9 +33,9 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
 
   List<String> get _photos {
     final media = (widget.user["mediaFiles"] as List?)?.cast<String>() ?? [];
-    if (media.isNotEmpty) return media;
+    if (media.isNotEmpty) return media.map(PublicUrl.media).toList();
     final pic = widget.user["profilePicture"];
-    return pic != null ? [pic.toString()] : [];
+    return pic != null ? [PublicUrl.media(pic.toString())] : [];
   }
 
   void _act(VoidCallback? cb) {
@@ -45,8 +48,23 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
     if (n <= 1) return;
     final next = (_photo + delta).clamp(0, n - 1);
     if (next == _photo) return;
-    _pc.animateToPage(next,
-        duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+    unawaited(
+      _pc
+          .animateToPage(
+        next,
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeOut,
+      )
+          .catchError((Object error) {
+        debugPrint("Não foi possível trocar a foto: $error");
+      }),
+    );
+  }
+
+  @override
+  void dispose() {
+    _pc.dispose();
+    super.dispose();
   }
 
   @override
@@ -55,6 +73,7 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
     final photos = _photos;
     final interests = (u["interests"] as List?)?.cast<String>() ?? [];
     final match = u["matchPercent"];
+    final isVirtual = u["isVirtual"] == true || u["isBot"] == true;
 
     return Scaffold(
       backgroundColor: AppTheme.bg,
@@ -73,7 +92,8 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                       onPageChanged: (i) => setState(() => _photo = i),
                       itemBuilder: (_, i) => photos.isEmpty
                           ? Container(color: AppTheme.navy)
-                          : CachedNetworkImage(imageUrl: photos[i], fit: BoxFit.cover),
+                          : CachedNetworkImage(
+                              imageUrl: photos[i], fit: BoxFit.cover),
                     ),
                     // Zonas de toque nas laterais (centro livre para swipe).
                     if (photos.length > 1)
@@ -109,9 +129,12 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                             (i) => Expanded(
                               child: Container(
                                 height: 4,
-                                margin: const EdgeInsets.symmetric(horizontal: 2),
+                                margin:
+                                    const EdgeInsets.symmetric(horizontal: 2),
                                 decoration: BoxDecoration(
-                                  color: i == _photo ? Colors.white : Colors.white38,
+                                  color: i == _photo
+                                      ? Colors.white
+                                      : Colors.white38,
                                   borderRadius: BorderRadius.circular(2),
                                 ),
                               ),
@@ -135,12 +158,13 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                         top: 50,
                         right: 16,
                         child: Container(
-                          padding:
-                              const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 7),
                           decoration: BoxDecoration(
                             color: AppTheme.navy.withOpacity(0.7),
                             borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: AppTheme.gold, width: 1.5),
+                            border:
+                                Border.all(color: AppTheme.gold, width: 1.5),
                           ),
                           child: Text("$match% match",
                               style: TextStyle(
@@ -167,10 +191,38 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                               ),
                               if (u["isVerified"] == true) ...[
                                 const SizedBox(width: 8),
-                                Icon(Icons.verified, color: AppTheme.gold, size: 24),
+                                Icon(Icons.verified,
+                                    color: AppTheme.gold, size: 24),
                               ],
                             ],
                           ),
+                          if (isVirtual) ...[
+                            const SizedBox(height: 7),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                color: AppTheme.gold,
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.smart_toy_outlined,
+                                      color: AppTheme.navy, size: 14),
+                                  SizedBox(width: 5),
+                                  Text(
+                                    "Perfil virtual • IA",
+                                    style: TextStyle(
+                                      color: AppTheme.navy,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                           if (u["city"] != null || u["distanceKm"] != null)
                             Padding(
                               padding: const EdgeInsets.only(top: 5),
@@ -181,7 +233,8 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                                 Flexible(
                                   child: Text(
                                     [
-                                      if (u["city"] != null) u["city"].toString(),
+                                      if (u["city"] != null)
+                                        u["city"].toString(),
                                       if (u["distanceKm"] != null)
                                         "${u["distanceKm"]} km",
                                     ].join(" · "),
@@ -191,7 +244,8 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                                         color: Colors.white70, fontSize: 15),
                                   ),
                                 ),
-                                if (onlineLabel(u["isOnline"], u["lastActiveAt"]) !=
+                                if (onlineLabel(
+                                        u["isOnline"], u["lastActiveAt"]) !=
                                     null) ...[
                                   const SizedBox(width: 10),
                                   Container(
@@ -222,7 +276,8 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                 child: Container(
                   decoration: const BoxDecoration(
                     color: AppTheme.bg,
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+                    borderRadius:
+                        BorderRadius.vertical(top: Radius.circular(26)),
                   ),
                   padding: EdgeInsets.fromLTRB(
                       20, 22, 20, widget.withActions ? 120 : 30),
@@ -242,7 +297,8 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.favorite, color: AppTheme.gold, size: 18),
+                              Icon(Icons.favorite,
+                                  color: AppTheme.gold, size: 18),
                               const SizedBox(width: 8),
                               Text("$match% de compatibilidade",
                                   style: const TextStyle(
@@ -261,7 +317,8 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
                           if (u["denomination"] != null)
                             _pill(Icons.book, u["denomination"].toString()),
                           if (u["churchFrequency"] != null)
-                            _pill(Icons.church, u["churchFrequency"].toString()),
+                            _pill(
+                                Icons.church, u["churchFrequency"].toString()),
                           if (u["intention"] != null)
                             _pill(Icons.favorite, u["intention"].toString()),
                         ],
@@ -372,7 +429,9 @@ class _ProfileDetailViewState extends State<ProfileDetailView> {
           const SizedBox(width: 7),
           Text(text,
               style: const TextStyle(
-                  color: AppTheme.navy, fontWeight: FontWeight.w600, fontSize: 13)),
+                  color: AppTheme.navy,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13)),
         ]),
       );
 

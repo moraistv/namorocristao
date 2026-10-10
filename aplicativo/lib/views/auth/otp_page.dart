@@ -124,7 +124,7 @@ class _OtpPageState extends ConsumerState<OtpPage> {
           EasyLoading.showSuccess("Login Successful");
           Navigator.pushAndRemoveUntil(
               context,
-              MaterialPageRoute(builder: (_) => const LandingWidget()),
+              MaterialPageRoute(builder: (_) => const SplashScreen()),
               (route) => false);
         } else {
           EasyLoading.showError("Something went wrong!");

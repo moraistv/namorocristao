@@ -35,7 +35,8 @@ class _EnableLocationPageState extends State<EnableLocationPage> {
         perm = await Geolocator.requestPermission();
       }
       if (perm == LocationPermission.deniedForever) {
-        EasyLoading.showInfo("Permissão bloqueada. Abrindo as configurações...");
+        EasyLoading.showInfo(
+            "Permissão bloqueada. Abrindo as configurações...");
         await Geolocator.openAppSettings();
         return;
       }
@@ -115,8 +116,7 @@ class _EnableLocationPageState extends State<EnableLocationPage> {
                 onPressed: () => Navigator.of(context).maybePop(),
                 child: const Text("Agora não",
                     style: TextStyle(
-                        color: Color(0xFF9AA1B2),
-                        fontWeight: FontWeight.w600)),
+                        color: Color(0xFF9AA1B2), fontWeight: FontWeight.w600)),
               ),
               const SizedBox(height: 4),
               _termsText(context),
@@ -130,13 +130,17 @@ class _EnableLocationPageState extends State<EnableLocationPage> {
   Widget _termsText(BuildContext context) {
     const base = TextStyle(color: Color(0xFF9AA1B2), fontSize: 12, height: 1.4);
     final link = TextStyle(
-        color: AppTheme.gold, fontSize: 12, fontWeight: FontWeight.w600, height: 1.4);
+        color: AppTheme.gold,
+        fontSize: 12,
+        fontWeight: FontWeight.w600,
+        height: 1.4);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Text.rich(
         TextSpan(
           children: [
-            TextSpan(text: "Ao continuar, você concorda com nossos ", style: base),
+            TextSpan(
+                text: "Ao continuar, você concorda com nossos ", style: base),
             TextSpan(
               text: "Termos de Serviço",
               style: link,

@@ -1,7 +1,6 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import {
-  IconArrowLeft, IconGift, IconTrash, IconUpload, IconCoin, IconDeviceFloppy,
+  IconGift, IconTrash, IconUpload, IconCoin, IconDeviceFloppy,
   IconPencil, IconPlus,
 } from "@tabler/icons-react";
 import { API_BASE, del, get, post, put } from "../api";
@@ -142,25 +141,15 @@ function GiftModal({ gift, onClose, onSaved, onError }: {
 }
 
 export default function Gifts() {
-  const navigate = useNavigate();
   const [gifts, setGifts] = useState<Gift[]>([]);
-  const [creditReais, setCreditReais] = useState("");
   const [modal, setModal] = useState<{ gift: Gift | null } | null>(null);
   const [dialog, setDialog] = useState<DialogConfig | null>(null);
   const [toast, setToast] = useState<ToastMsg | null>(null);
 
   function load() {
     get("/admin/gifts").then((r) => setGifts(r.gifts)).catch((e) => setToast({ type: "error", text: e.message }));
-    get("/admin/monetization").then((r) => setCreditReais((r.settings.creditPriceCents / 100).toFixed(2))).catch(() => {});
   }
   useEffect(() => { load(); }, []);
-
-  async function saveCreditPrice() {
-    const cents = Math.round(parseFloat(creditReais.replace(",", ".")) * 100);
-    if (!cents || cents < 1) return setToast({ type: "error", text: "Valor inválido" });
-    try { await put("/admin/monetization", { creditPriceCents: cents, currency: "BRL" }); setToast({ type: "success", text: "Valor do crédito salvo" }); }
-    catch (e: any) { setToast({ type: "error", text: e.message }); }
-  }
 
   async function toggleActive(g: Gift) {
     try { await put(`/admin/gifts/${g.id}`, { active: !g.active }); load(); }
@@ -178,12 +167,9 @@ export default function Gifts() {
     });
   }
 
-  const creditValue = parseFloat((creditReais || "0").replace(",", ".")) || 0;
-
   return (
     <>
       <div className="d-flex align-items-center mb-3">
-        <button className="btn btn-icon me-3" onClick={() => navigate("/planos")}><IconArrowLeft size={18} /></button>
         <div className="flex-fill">
           <div className="page-pretitle">Monetização</div>
           <h2 className="page-title mb-0"><IconGift size={22} className="me-2" />Presentes</h2>
@@ -193,20 +179,9 @@ export default function Gifts() {
         </button>
       </div>
 
-      {/* Valor do crédito */}
-      <div className="card mb-3">
-        <div className="card-body d-flex align-items-center flex-wrap gap-3">
-          <span className="avatar" style={{ background: "rgba(47,179,68,.15)", color: "#2fb344" }}><IconCoin size={22} /></span>
-          <div className="flex-fill">
-            <div className="fw-bold">Valor de 1 crédito</div>
-            <div className="text-secondary" style={{ fontSize: 13 }}>Base de cálculo do que o usuário paga nos presentes.</div>
-          </div>
-          <div className="input-group" style={{ maxWidth: 220 }}>
-            <span className="input-group-text">R$</span>
-            <input className="form-control" value={creditReais} onChange={(e) => setCreditReais(e.target.value)} />
-            <button className="btn btn-primary" onClick={saveCreditPrice}><IconDeviceFloppy size={16} /></button>
-          </div>
-        </div>
+      <div className="alert alert-info">
+        Os usuários ganham <strong>créditos</strong> assistindo a anúncios (veja <strong>Recompensas</strong>) e gastam
+        os créditos enviando estes presentes nas conversas.
       </div>
 
       {/* Grade de presentes */}
@@ -233,9 +208,6 @@ export default function Gifts() {
                       <div className="fw-bold text-truncate" style={{ fontSize: 14 }}>{g.name}</div>
                       <div className="my-1">
                         <span className="badge bg-yellow-lt"><IconCoin size={12} className="me-1" />{g.costCredits} créd.</span>
-                      </div>
-                      <div className="text-secondary" style={{ fontSize: 11 }}>
-                        ≈ R$ {(g.costCredits * creditValue).toFixed(2).replace(".", ",")}
                       </div>
                       <div className="d-flex align-items-center justify-content-between mt-2 pt-2" style={{ borderTop: "1px solid var(--tblr-border-color)" }}>
                         <label className="form-check form-switch m-0">

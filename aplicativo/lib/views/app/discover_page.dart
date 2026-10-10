@@ -1,15 +1,18 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_card_swiper/flutter_card_swiper.dart';
+import 'package:mioamoreapp/services/ads_service.dart';
 import 'package:mioamoreapp/services/app_api.dart';
 import 'package:mioamoreapp/services/analytics_service.dart';
+import 'package:mioamoreapp/services/public_url.dart';
 import 'package:mioamoreapp/services/realtime_bus.dart';
 import 'package:mioamoreapp/services/token_storage.dart';
 import 'package:mioamoreapp/views/app/app_theme.dart';
 import 'package:mioamoreapp/views/app/match_celebration.dart';
 import 'package:mioamoreapp/views/app/filters_page.dart';
-import 'package:mioamoreapp/views/app/premium_page.dart';
+import 'package:mioamoreapp/views/app/rewards_page.dart';
 import 'package:mioamoreapp/views/app/profile_detail_view.dart';
 
 class DiscoverPage extends StatefulWidget {
@@ -27,19 +30,24 @@ class _DiscoverPageState extends State<DiscoverPage> {
   DiscoverFilters _filters = DiscoverFilters();
   int _superLikesLeft = 0;
   bool _isPremium = false;
+  bool _swipeRequestInFlight = false;
+  bool _superLikePrepared = false;
+  int _loadGeneration = 0;
+  int? _confirmedSwipeIndex;
+  CardSwiperDirection? _confirmedSwipeDirection;
   String? _pendingSuperNote;
 
   @override
   void initState() {
     super.initState();
-    _load();
-    _loadStats();
+    unawaited(_load());
+    unawaited(_loadStats());
     RealtimeBus.account.addListener(_onAccountChanged);
   }
 
   void _onAccountChanged() {
     if (!mounted) return;
-    _loadStats();
+    unawaited(_loadStats());
   }
 
   Future<void> _loadStats() async {
@@ -61,141 +69,246 @@ class _DiscoverPageState extends State<DiscoverPage> {
   }
 
   Future<void> _load() async {
+    final generation = ++_loadGeneration;
+    if (!mounted) return;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final res = await AppApi.getDiscovery(_filters.toQuery());
-      if (res["needsProfile"] == true) {
+      final response = await AppApi.getDiscovery(_filters.toQuery());
+      if (!mounted || generation != _loadGeneration) return;
+      if (response["needsProfile"] == true) {
         setState(() {
           _needsProfile = true;
+          _cards = [];
           _loading = false;
         });
         return;
       }
+      final candidates = (response["candidates"] as List? ?? const [])
+          .whereType<Map>()
+          .map((candidate) => Map<String, dynamic>.from(candidate))
+          .toList();
       setState(() {
-        _cards = (res["candidates"] as List).cast<Map<String, dynamic>>();
+        _needsProfile = false;
+        _cards = candidates;
         _loading = false;
       });
-    } on AppApiException catch (e) {
+    } on AppApiException catch (error) {
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
-        _error = e.message;
+        _error = error.message;
+        _loading = false;
+      });
+    } catch (_) {
+      if (!mounted || generation != _loadGeneration) return;
+      setState(() {
+        _error = "Não foi possível carregar perfis agora.";
         _loading = false;
       });
     }
   }
 
-  Future<void> _swipe(Map<String, dynamic> user, String type) async {
-    final note = type == "SUPERLIKE" ? _pendingSuperNote : null;
-    _pendingSuperNote = null;
+  Future<void> _confirmSwipe(
+    Map<String, dynamic> user,
+    String type,
+    CardSwiperDirection direction,
+    int cardIndex,
+    String? note,
+  ) async {
+    if (_swipeRequestInFlight) return;
+    setState(() => _swipeRequestInFlight = true);
+
     try {
-      final res = await AppApi.swipe(user["id"].toString(), type, note: note);
+      final response = await AppApi.swipe(
+        user["id"].toString(),
+        type,
+        note: note,
+      );
+      if (!mounted) return;
+
       AnalyticsService.swipe(type);
-      if (type == "SUPERLIKE") _loadStats();
-      if (res["matched"] == true && mounted) {
+      if (type == "SUPERLIKE") unawaited(_loadStats());
+      _confirmedSwipeIndex = cardIndex;
+      _confirmedSwipeDirection = direction;
+      setState(() => _swipeRequestInFlight = false);
+      _controller.swipe(direction);
+
+      if (response["matched"] == true) {
         AnalyticsService.match();
-        final w = res["withUser"] as Map?;
-        // Deixa a animação do card terminar antes de abrir a tela de match
-        // (evita o "travamento"/flicker de abrir o diálogo durante o swipe).
+        final withUser = response["withUser"] as Map?;
         await Future.delayed(const Duration(milliseconds: 420));
         if (!mounted) return;
-        showMatchCelebration(
+        await showMatchCelebration(
           context,
-          matchId: res["matchId"].toString(),
-          otherName: (w?["name"] ?? user["name"]).toString(),
-          otherPhoto: (w?["photo"] ?? user["profilePicture"])?.toString(),
-          otherUserId: (w?["userId"] ?? user["id"])?.toString(),
+          matchId: response["matchId"].toString(),
+          otherName: (withUser?["name"] ?? user["name"]).toString(),
+          otherPhoto:
+              (withUser?["photo"] ?? user["profilePicture"])?.toString(),
+          otherUserId: (withUser?["userId"] ?? user["id"])?.toString(),
           myPhoto: TokenStorage.myPhoto,
+          otherIsVirtual: withUser?["isVirtual"] == true ||
+              withUser?["isBot"] == true ||
+              user["isVirtual"] == true ||
+              user["isBot"] == true,
         );
       }
-    } on AppApiException catch (e) {
-      // Limite de super like atingido → oferece o VIP.
-      if (e.statusCode == 403 && mounted) {
-        _openPremium("Seus Super Likes acabaram por hoje");
-        _loadStats();
+    } on AppApiException catch (error) {
+      if (!mounted) return;
+      _showSwipeError(error.message);
+      if (type == "SUPERLIKE" && error.statusCode == 403) {
+        _openRewards(_superLikesOutText);
+        unawaited(_loadStats());
       }
-    } catch (_) {}
-  }
-
-  void _openPremium(String highlight) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => PremiumPage(highlight: highlight)),
-    ).then((_) => _loadStats());
-  }
-
-  /// Tenta dar super like: se não houver saldo e não for premium, abre o VIP.
-  Future<void> _trySuperLike() async {
-    if (!_isPremium && _superLikesLeft <= 0) {
-      _openPremium("Tenha mais Super Likes com o VIP");
-      return;
+    } catch (_) {
+      if (mounted) {
+        _showSwipeError(
+            "Não foi possível registrar sua escolha. Tente novamente.");
+      }
+    } finally {
+      if (mounted && _swipeRequestInFlight) {
+        setState(() => _swipeRequestInFlight = false);
+      }
     }
-    final note = await _askSuperNote();
-    if (note == null) return; // cancelou
-    _pendingSuperNote = note.isEmpty ? null : note;
-    _controller.swipe(CardSwiperDirection.top);
   }
 
-  /// Diálogo do Super Like com recado opcional. Retorna o texto, "" (sem recado) ou null (cancelar).
-  Future<String?> _askSuperNote() async {
-    final ctrl = TextEditingController();
-    return showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: Row(children: [
-          Icon(Icons.star_rounded, color: AppTheme.gold),
-          const SizedBox(width: 8),
-          const Text("Super Like"),
-        ]),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text(
-              "Mande um recado junto com seu Super Like (opcional). Quem recebe vê sua mensagem!",
-              style: TextStyle(fontSize: 13, color: Color(0xFF7A849C)),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: ctrl,
-              maxLength: 200,
-              maxLines: 2,
-              decoration: const InputDecoration(
-                hintText: "Ex.: Adorei seu perfil! 🙏",
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text("Cancelar")),
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, ""),
-              child: const Text("Sem recado")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.gold, foregroundColor: AppTheme.navy),
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: const Text("Enviar"),
-          ),
-        ],
+  void _showSwipeError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
       ),
     );
   }
 
-  bool _onSwipe(int prev, int? current, CardSwiperDirection dir) {
-    final user = _cards[prev];
-    if (dir == CardSwiperDirection.right) {
-      _swipe(user, "LIKE");
-    } else if (dir == CardSwiperDirection.left) {
-      _swipe(user, "DISLIKE");
-    } else if (dir == CardSwiperDirection.top) {
-      _swipe(user, "SUPERLIKE");
+  static const _superLikesOutText =
+      "Seus Super Likes acabaram. Assista a um anúncio e ganhe mais.";
+
+  /// Leva às recompensas por anúncio (se estiverem disponíveis).
+  void _openRewards(String highlight) {
+    if (!AdsService.rewardedAvailable) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => RewardsPage(highlight: highlight)),
+    ).then((_) {
+      if (mounted) unawaited(_loadStats());
+    });
+  }
+
+  /// Usa o mesmo gate de saldo e recado para botão, gesto e perfil detalhado.
+  Future<void> _trySuperLike() async {
+    if (_swipeRequestInFlight) return;
+    if (!_isPremium && _superLikesLeft <= 0) {
+      if (AdsService.rewardedAvailable) {
+        _openRewards(_superLikesOutText);
+      } else {
+        _showSwipeError("Seus Super Likes de hoje acabaram. Volte amanhã!");
+      }
+      return;
     }
-    return true;
+    final note = await _askSuperNote();
+    if (note == null || !mounted) return;
+    _pendingSuperNote = note.isEmpty ? null : note;
+    _superLikePrepared = true;
+    _controller.swipe(CardSwiperDirection.top);
+  }
+
+  /// Retorna o recado, vazio para seguir sem recado, ou null ao cancelar.
+  Future<String?> _askSuperNote() async {
+    final controller = TextEditingController();
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: Row(children: [
+            Icon(Icons.star_rounded, color: AppTheme.gold),
+            const SizedBox(width: 8),
+            const Text("Super Like"),
+          ]),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "Mande um recado junto com seu Super Like (opcional). Quem recebe vê sua mensagem!",
+                style: TextStyle(fontSize: 13, color: Color(0xFF7A849C)),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: controller,
+                maxLength: 200,
+                maxLines: 2,
+                decoration: const InputDecoration(
+                  hintText: "Ex.: Adorei seu perfil! 🙏",
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text("Cancelar"),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, ""),
+              child: const Text("Sem recado"),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.gold,
+                foregroundColor: AppTheme.navy,
+              ),
+              onPressed: () =>
+                  Navigator.pop(dialogContext, controller.text.trim()),
+              child: const Text("Enviar"),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  bool _onSwipe(int previous, int? current, CardSwiperDirection direction) {
+    if (_confirmedSwipeIndex == previous &&
+        _confirmedSwipeDirection == direction) {
+      _confirmedSwipeIndex = null;
+      _confirmedSwipeDirection = null;
+      return true;
+    }
+    if (_swipeRequestInFlight || previous < 0 || previous >= _cards.length) {
+      return false;
+    }
+    if (direction == CardSwiperDirection.top && !_superLikePrepared) {
+      unawaited(_trySuperLike());
+      return false;
+    }
+
+    final user = _cards[previous];
+    late final String type;
+    switch (direction) {
+      case CardSwiperDirection.right:
+        type = "LIKE";
+        break;
+      case CardSwiperDirection.left:
+        type = "DISLIKE";
+        break;
+      case CardSwiperDirection.top:
+        type = "SUPERLIKE";
+        break;
+      default:
+        return false;
+    }
+
+    final note = type == "SUPERLIKE" ? _pendingSuperNote : null;
+    _pendingSuperNote = null;
+    _superLikePrepared = false;
+    unawaited(_confirmSwipe(user, type, direction, previous, note));
+    return false;
   }
 
   void _openProfile(Map<String, dynamic> user) {
@@ -207,7 +320,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
           withActions: true,
           onLike: () => _controller.swipe(CardSwiperDirection.right),
           onNope: () => _controller.swipe(CardSwiperDirection.left),
-          onSuper: () => _controller.swipe(CardSwiperDirection.top),
+          onSuper: () => unawaited(_trySuperLike()),
         ),
       ),
     );
@@ -222,12 +335,17 @@ class _DiscoverPageState extends State<DiscoverPage> {
             title: "Descobrir",
             icon: Icons.local_fire_department_rounded,
             actions: [
-              IconButton(
-                onPressed: () => _openPremium(
-                    "Aproveite o máximo da sua jornada no amor 🙏"),
-                icon: Icon(Icons.workspace_premium,
-                    color: _isPremium ? AppTheme.gold : AppTheme.navy),
-                tooltip: "VIP",
+              ValueListenableBuilder<int>(
+                valueListenable: AdsService.revision,
+                builder: (_, __, ___) => AdsService.rewardedAvailable
+                    ? IconButton(
+                        onPressed: () => _openRewards(
+                            "Assista a anúncios e ganhe Super Likes, Boosts e créditos."),
+                        icon: const Icon(Icons.redeem_rounded,
+                            color: AppTheme.navy),
+                        tooltip: "Recompensas",
+                      )
+                    : const SizedBox.shrink(),
               ),
               IconButton(
                 onPressed: () async {
@@ -236,16 +354,16 @@ class _DiscoverPageState extends State<DiscoverPage> {
                     MaterialPageRoute(
                         builder: (_) => FiltersPage(filters: _filters)),
                   );
-                  if (result != null) {
-                    setState(() => _filters = result);
-                    _load();
-                  }
+                  if (!mounted || result == null) return;
+                  setState(() => _filters = result);
+                  unawaited(_load());
                 },
                 icon: const Icon(Icons.tune, color: AppTheme.navy),
               ),
               IconButton(
-                  onPressed: _load,
-                  icon: const Icon(Icons.refresh, color: AppTheme.navy)),
+                onPressed: () => unawaited(_load()),
+                icon: const Icon(Icons.refresh, color: AppTheme.navy),
+              ),
             ],
           ),
           Expanded(child: _body()),
@@ -284,10 +402,13 @@ class _DiscoverPageState extends State<DiscoverPage> {
             isLoop: false,
             scale: 1.0,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-            allowedSwipeDirection:
-                const AllowedSwipeDirection.only(left: true, right: true),
+            allowedSwipeDirection: const AllowedSwipeDirection.only(
+              left: true,
+              right: true,
+              up: true,
+            ),
             onSwipe: _onSwipe,
-            onEnd: _load,
+            onEnd: () => unawaited(_load()),
             cardBuilder: (context, index, px, py) => _DiscoverCard(
               user: _cards[index],
               percentX: px,
@@ -344,22 +465,26 @@ class _DiscoverPageState extends State<DiscoverPage> {
   }
 
   Widget _actionBtn(IconData icon, Color bg, Color fg, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 60,
-        height: 60,
-        decoration: BoxDecoration(
-          color: bg,
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
+    return Opacity(
+      opacity: _swipeRequestInFlight ? 0.55 : 1,
+      child: GestureDetector(
+        onTap: _swipeRequestInFlight ? null : onTap,
+        child: Container(
+          width: 60,
+          height: 60,
+          decoration: BoxDecoration(
+            color: bg,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
                 color: Colors.black.withOpacity(0.12),
                 blurRadius: 12,
-                offset: const Offset(0, 6)),
-          ],
+                offset: const Offset(0, 6),
+              ),
+            ],
+          ),
+          child: Icon(icon, color: fg, size: 28),
         ),
-        child: Icon(icon, color: fg, size: 28),
       ),
     );
   }
@@ -385,9 +510,9 @@ class _DiscoverCardState extends State<_DiscoverCard> {
 
   List<String> get _photos {
     final media = (widget.user["mediaFiles"] as List?)?.cast<String>() ?? [];
-    if (media.isNotEmpty) return media;
+    if (media.isNotEmpty) return media.map(PublicUrl.media).toList();
     final pic = widget.user["profilePicture"];
-    return pic != null ? [pic.toString()] : [];
+    return pic != null ? [PublicUrl.media(pic.toString())] : [];
   }
 
   @override
@@ -395,6 +520,7 @@ class _DiscoverCardState extends State<_DiscoverCard> {
     final u = widget.user;
     final photos = _photos;
     final match = u["matchPercent"];
+    final isVirtual = u["isVirtual"] == true || u["isBot"] == true;
     final px = widget.percentX;
     final py = widget.percentY;
 
@@ -430,7 +556,8 @@ class _DiscoverCardState extends State<_DiscoverCard> {
               imageUrl: photos[_photo % photos.length],
               fit: BoxFit.cover,
               placeholder: (_, __) => Container(color: const Color(0xFFE8EAF0)),
-              errorWidget: (_, __, ___) => Container(color: const Color(0xFFE8EAF0)),
+              errorWidget: (_, __, ___) =>
+                  Container(color: const Color(0xFFE8EAF0)),
             )
           else
             Container(color: const Color(0xFFE8EAF0)),
@@ -568,8 +695,7 @@ class _DiscoverCardState extends State<_DiscoverCard> {
               ),
             ),
 
-          if (match is num)
-            const SizedBox.shrink(),
+          if (match is num) const SizedBox.shrink(),
 
           Positioned(
             left: 20,
@@ -581,80 +707,109 @@ class _DiscoverCardState extends State<_DiscoverCard> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                Row(children: [
-                  Flexible(
-                    child: Text("${u["name"]}, ${u["age"]}",
-                        style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold)),
-                  ),
-                  if (u["isVerified"] == true) ...[
-                    const SizedBox(width: 6),
-                    Icon(Icons.verified, color: AppTheme.gold, size: 22),
-                  ],
-                  if (match is num) ...[
-                    const SizedBox(width: 8),
+                  if (isVirtual) ...[
                     Container(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
                         color: AppTheme.gold,
-                        borderRadius: BorderRadius.circular(20),
+                        borderRadius: BorderRadius.circular(16),
                       ),
-                      child: Text("$match%",
-                          style: const TextStyle(
+                      child: const Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.smart_toy_outlined,
+                              color: AppTheme.navy, size: 14),
+                          SizedBox(width: 5),
+                          Text(
+                            "Perfil virtual • IA",
+                            style: TextStyle(
                               color: AppTheme.navy,
+                              fontSize: 11,
                               fontWeight: FontWeight.bold,
-                              fontSize: 12)),
-                    ),
-                  ],
-                ]),
-                if (_infoLine(u) != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
-                    child: Row(children: [
-                      const Icon(Icons.location_on,
-                          color: Colors.white70, size: 16),
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          _infoLine(u)!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              color: Colors.white70, fontSize: 14),
-                        ),
+                            ),
+                          ),
+                        ],
                       ),
-                      if (onlineLabel(u["isOnline"], u["lastActiveAt"]) != null) ...[
-                        const SizedBox(width: 8),
-                        Container(
-                          width: 8,
-                          height: 8,
-                          decoration: const BoxDecoration(
-                              color: Color(0xFF2ECC71), shape: BoxShape.circle),
-                        ),
-                        const SizedBox(width: 4),
-                        Text(onlineLabel(u["isOnline"], u["lastActiveAt"])!,
-                            style: const TextStyle(
-                                color: Colors.white, fontSize: 12.5)),
-                      ],
-                    ]),
-                  ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    if (u["denomination"] != null)
-                      _tag(Icons.book, u["denomination"].toString()),
-                    if (u["intention"] != null)
-                      _tag(Icons.favorite, u["intention"].toString()),
+                    ),
+                    const SizedBox(height: 7),
                   ],
-                ),
-              ],
+                  Row(children: [
+                    Flexible(
+                      child: Text("${u["name"]}, ${u["age"]}",
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 28,
+                              fontWeight: FontWeight.bold)),
+                    ),
+                    if (u["isVerified"] == true) ...[
+                      const SizedBox(width: 6),
+                      Icon(Icons.verified, color: AppTheme.gold, size: 22),
+                    ],
+                    if (match is num) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 9, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: AppTheme.gold,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text("$match%",
+                            style: const TextStyle(
+                                color: AppTheme.navy,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12)),
+                      ),
+                    ],
+                  ]),
+                  if (_infoLine(u) != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Row(children: [
+                        const Icon(Icons.location_on,
+                            color: Colors.white70, size: 16),
+                        const SizedBox(width: 4),
+                        Flexible(
+                          child: Text(
+                            _infoLine(u)!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                color: Colors.white70, fontSize: 14),
+                          ),
+                        ),
+                        if (onlineLabel(u["isOnline"], u["lastActiveAt"]) !=
+                            null) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: const BoxDecoration(
+                                color: Color(0xFF2ECC71),
+                                shape: BoxShape.circle),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(onlineLabel(u["isOnline"], u["lastActiveAt"])!,
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 12.5)),
+                        ],
+                      ]),
+                    ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      if (u["denomination"] != null)
+                        _tag(Icons.book, u["denomination"].toString()),
+                      if (u["intention"] != null)
+                        _tag(Icons.favorite, u["intention"].toString()),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
           ),
         ],
       ),
@@ -682,7 +837,9 @@ class _DiscoverCardState extends State<_DiscoverCard> {
           const SizedBox(width: 6),
           Text(text,
               style: const TextStyle(
-                  color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600)),
         ]),
       );
 }

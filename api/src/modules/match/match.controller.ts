@@ -1,10 +1,18 @@
+import { Profile } from "@prisma/client";
 import { Request, Response } from "express";
 import { z } from "zod";
 import { prisma } from "../../config/prisma";
-import { AppError } from "../../lib/errors";
 import { ageFromBirthday } from "../../lib/age";
+import { AppError } from "../../lib/errors";
 import { distanceBetween } from "../../lib/geo";
 import { isPremiumActive } from "../../lib/premium";
+import { isRecentlyOnline } from "../../lib/presence";
+import {
+  PublicProfileSource,
+  publicProfileInclude,
+  publicVirtualFlags,
+  sanitizePublicMedia,
+} from "../../lib/publicProfile";
 import * as service from "./match.service";
 
 const swipeSchema = z.object({
@@ -13,75 +21,156 @@ const swipeSchema = z.object({
   note: z.string().max(300).optional(),
 });
 
-function cardFromProfile(p: any, userId: string, me?: any) {
-  if (!p) {
-    return { userId, name: "Usuário", age: null, profilePicture: null, city: null };
+function numericQueryValue(value: unknown): unknown {
+  if (value === undefined) return undefined;
+  if (typeof value === "number") return value;
+  if (typeof value !== "string" || value.trim() === "") return Number.NaN;
+  return Number(value);
+}
+
+const discoveryQuerySchema = z
+  .object({
+    minAge: z.preprocess(
+      numericQueryValue,
+      z.number().finite().int().min(18).max(99).optional()
+    ),
+    maxAge: z.preprocess(
+      numericQueryValue,
+      z.number().finite().int().min(18).max(99).optional()
+    ),
+    maxDistanceKm: z.preprocess(
+      numericQueryValue,
+      z.number().finite().positive().optional()
+    ),
+  })
+  .superRefine((value, ctx) => {
+    if (
+      value.minAge !== undefined &&
+      value.maxAge !== undefined &&
+      value.minAge > value.maxAge
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["maxAge"],
+        message: "maxAge deve ser maior ou igual a minAge",
+      });
+    }
+  });
+
+const premiumFilterSchema = z.string().trim().min(1).max(60);
+
+function cardFromProfile(
+  profile: PublicProfileSource | undefined,
+  userId: string,
+  me?: Profile | null
+) {
+  if (!profile) {
+    return {
+      userId,
+      name: "Usuário",
+      age: null,
+      profilePicture: null,
+      city: null,
+      distanceKm: null,
+      isOnline: false,
+      lastActiveAt: null,
+      ...publicVirtualFlags(false),
+    };
   }
-  const distance = me ? distanceBetween(me, p) : null;
+  const media = sanitizePublicMedia(profile);
   return {
     userId,
-    name: p.fullName,
-    age: ageFromBirthday(p.birthday),
-    profilePicture: p.profilePicture,
-    city: p.city,
-    distanceKm: distance,
-    isOnline: p.isOnline,
-    lastActiveAt: p.lastActiveAt,
+    name: profile.fullName,
+    age: ageFromBirthday(profile.birthday),
+    profilePicture: media.profilePicture,
+    city: profile.city,
+    distanceKm: me ? distanceBetween(me, profile) : null,
+    isOnline: isRecentlyOnline(profile),
+    lastActiveAt: profile.lastActiveAt,
+    ...publicVirtualFlags(profile.user.isBot),
   };
 }
 
-// GET /api/likes — quem deu match + quem te curtiu (gated por premium)
+// GET /api/likes — matches e curtidas recebidas.
 export async function likes(req: Request, res: Response) {
   const userId = req.userId!;
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  const isPremium = user ? isPremiumActive(user) : false;
-  const me = await prisma.profile.findUnique({ where: { userId } });
+  const [user, me, matches, incoming, outgoing] = await Promise.all([
+    prisma.user.findUnique({ where: { id: userId } }),
+    prisma.profile.findUnique({ where: { userId } }),
+    prisma.match.findMany({
+      where: {
+        isActive: true,
+        OR: [{ userAId: userId }, { userBId: userId }],
+      },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.interaction.findMany({
+      where: { toUserId: userId, type: { in: ["LIKE", "SUPERLIKE"] } },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.interaction.findMany({
+      where: { fromUserId: userId },
+      select: { toUserId: true },
+    }),
+  ]);
 
-  const matches = await prisma.match.findMany({
-    where: { isActive: true, OR: [{ userAId: userId }, { userBId: userId }] },
-    orderBy: { createdAt: "desc" },
-  });
-  const matchCards = await Promise.all(
-    matches.map(async (m) => {
-      const otherId = m.userAId === userId ? m.userBId : m.userAId;
-      const p = await prisma.profile.findUnique({ where: { userId: otherId } });
-      return { ...cardFromProfile(p, otherId, me), matchId: m.id };
-    })
+  const matchedIds = new Set(
+    matches.map((match) =>
+      match.userAId === userId ? match.userBId : match.userAId
+    )
   );
-  const matchedIds = new Set(matchCards.map((c) => c.userId));
-
-  const incoming = await prisma.interaction.findMany({
-    where: { toUserId: userId, type: { in: ["LIKE", "SUPERLIKE"] } },
-    orderBy: { createdAt: "desc" },
-  });
-  const myOut = new Set(
-    (
-      await prisma.interaction.findMany({
-        where: { fromUserId: userId },
-        select: { toUserId: true },
-      })
-    ).map((i) => i.toUserId)
+  const outgoingIds = new Set(
+    outgoing.map((interaction) => interaction.toUserId)
   );
   const pending = incoming.filter(
-    (i) => !myOut.has(i.fromUserId) && !matchedIds.has(i.fromUserId)
+    (interaction) =>
+      !outgoingIds.has(interaction.fromUserId) &&
+      !matchedIds.has(interaction.fromUserId)
   );
-  let likedYou = await Promise.all(
-    pending.map(async (i) => {
-      const p = await prisma.profile.findUnique({ where: { userId: i.fromUserId } });
-      return {
-        ...cardFromProfile(p, i.fromUserId, me),
-        superLike: i.type === "SUPERLIKE",
-        note: i.note ?? null,
-      };
-    })
+  const profileIds = Array.from(
+    new Set([
+      ...matchedIds,
+      ...pending.map((interaction) => interaction.fromUserId),
+    ])
   );
-  // Super likes têm prioridade (aparecem primeiro).
-  likedYou = likedYou.sort(
-    (a, b) => (b.superLike ? 1 : 0) - (a.superLike ? 1 : 0)
+  const profiles = profileIds.length
+    ? await prisma.profile.findMany({
+        where: {
+          userId: { in: profileIds },
+          user: { isBanned: false, deletedAt: null },
+        },
+        include: publicProfileInclude,
+      })
+    : [];
+  const profileById = new Map(
+    profiles.map((profile) => [profile.userId, profile])
   );
 
+  const matchCards = matches.map((match) => {
+    const otherId =
+      match.userAId === userId ? match.userBId : match.userAId;
+    return {
+      ...cardFromProfile(profileById.get(otherId), otherId, me),
+      matchId: match.id,
+    };
+  });
+  const likedYou = pending
+    .map((interaction) => ({
+      ...cardFromProfile(
+        profileById.get(interaction.fromUserId),
+        interaction.fromUserId,
+        me
+      ),
+      superLike: interaction.type === "SUPERLIKE",
+      note: interaction.note ?? null,
+    }))
+    .sort(
+      (first, second) =>
+        Number(second.superLike) - Number(first.superLike)
+    );
+
   res.json({
-    isPremium,
+    isPremium: user ? isPremiumActive(user) : false,
     matches: matchCards,
     likedYou,
     likedYouCount: likedYou.length,
@@ -90,11 +179,11 @@ export async function likes(req: Request, res: Response) {
 
 // GET /api/discovery
 export async function discovery(req: Request, res: Response) {
-  const minAge = req.query.minAge ? Number(req.query.minAge) : undefined;
-  const maxAge = req.query.maxAge ? Number(req.query.maxAge) : undefined;
-  const maxDistanceKm = req.query.maxDistanceKm
-    ? Number(req.query.maxDistanceKm)
-    : undefined;
+  const { minAge, maxAge, maxDistanceKm } = discoveryQuerySchema.parse({
+    minAge: req.query.minAge,
+    maxAge: req.query.maxAge,
+    maxDistanceKm: req.query.maxDistanceKm,
+  });
   const genderRaw = req.query.gender ? String(req.query.gender) : undefined;
   const gender =
     genderRaw === "MALE" || genderRaw === "FEMALE" || genderRaw === "OTHER"
@@ -106,10 +195,25 @@ export async function discovery(req: Request, res: Response) {
   const interests = req.query.interests
     ? String(req.query.interests).split(",").filter(Boolean)
     : undefined;
-  const intention = req.query.intention ? String(req.query.intention) : undefined;
-  const churchFrequency = req.query.churchFrequency
-    ? String(req.query.churchFrequency)
-    : undefined;
+  const intention = premiumFilterSchema.optional().parse(req.query.intention);
+  const churchFrequency = premiumFilterSchema
+    .optional()
+    .parse(req.query.churchFrequency);
+
+  if (intention !== undefined || churchFrequency !== undefined) {
+    const user = await prisma.user.findUnique({
+      where: { id: req.userId! },
+      select: { isPremium: true, premiumUntil: true },
+    });
+    if (!user || !isPremiumActive(user)) {
+      throw new AppError(
+        "Os filtros de intenção e frequência à igreja são recursos VIP.",
+        403,
+        undefined,
+        "PREMIUM_ONLY"
+      );
+    }
+  }
 
   const result = await service.getDiscovery(req.userId!, {
     minAge,
@@ -127,16 +231,8 @@ export async function discovery(req: Request, res: Response) {
 // POST /api/swipe
 export async function swipe(req: Request, res: Response) {
   const { toUserId, type, note } = swipeSchema.parse(req.body);
-  try {
-    const result = await service.swipe(req.userId!, toUserId, type, note);
-    res.json(result);
-  } catch (e) {
-    const err = e as Error & { code?: string };
-    if (err.code === "SUPERLIKE_LIMIT") {
-      return res.status(403).json({ error: err.message, code: "SUPERLIKE_LIMIT" });
-    }
-    throw new AppError(err.message, 400);
-  }
+  const result = await service.swipe(req.userId!, toUserId, type, note);
+  res.json(result);
 }
 
 // POST /api/swipe/undo — desfaz o último swipe (Rewind)
@@ -151,7 +247,7 @@ export async function undoSwipe(req: Request, res: Response) {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user || !isPremiumActive(user)) {
       return res.status(403).json({
-        error: "O Rewind é um recurso VIP. Assine para desfazer swipes!",
+        error: "O Rewind para desfazer swipes é um recurso exclusivo VIP.",
         code: "PREMIUM_ONLY",
       });
     }
@@ -159,8 +255,8 @@ export async function undoSwipe(req: Request, res: Response) {
   try {
     const result = await service.undoLastSwipe(userId);
     res.json(result);
-  } catch (e) {
-    throw new AppError((e as Error).message, 400);
+  } catch (error) {
+    throw new AppError((error as Error).message, 400);
   }
 }
 
@@ -176,16 +272,22 @@ export async function topPicks(req: Request, res: Response) {
   res.json(result);
 }
 
-// GET /api/users/:id/profile — card público de um usuário (para abrir pelo chat)
+// GET /api/users/:id/profile — card público aberto a partir do chat.
 export async function userCard(req: Request, res: Response) {
   const targetId = req.params.id;
   const [me, other] = await Promise.all([
     prisma.profile.findUnique({ where: { userId: req.userId! } }),
-    prisma.profile.findUnique({ where: { userId: targetId } }),
+    prisma.profile.findFirst({
+      where: {
+        userId: targetId,
+        user: { isBanned: false, deletedAt: null },
+      },
+      include: publicProfileInclude,
+    }),
   ]);
   if (!other) throw new AppError("Perfil não encontrado", 404);
-  const locked = new Set(other.lockedPhotos);
-  const publicMedia = other.mediaFiles.filter((m) => !locked.has(m));
+
+  const media = sanitizePublicMedia(other);
   res.json({
     user: {
       id: other.userId,
@@ -198,14 +300,14 @@ export async function userCard(req: Request, res: Response) {
       churchFrequency: other.churchFrequency,
       city: other.city,
       interests: other.interests,
-      mediaFiles: publicMedia,
-      profilePicture: other.profilePicture,
+      mediaFiles: media.mediaFiles,
+      profilePicture: media.profilePicture,
       isVerified: other.isVerified,
-      isOnline: other.isOnline,
+      isOnline: isRecentlyOnline(other),
       lastActiveAt: other.lastActiveAt,
       distanceKm: me ? distanceBetween(me, other) : null,
-      matchPercent:
-        me != null ? service.computeMatchPercent(me, other) : null,
+      matchPercent: me ? service.computeMatchPercent(me, other) : null,
+      ...publicVirtualFlags(other.user.isBot),
     },
   });
 }

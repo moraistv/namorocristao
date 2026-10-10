@@ -248,7 +248,7 @@ export default function UserDetail() {
         <Stat icon={IconFlag} value={st.reportsAgainst} label="Denúncias recebidas" color="#f76707" />
         <Stat icon={IconFlag} value={st.reportsMade} label="Denúncias feitas" color="#f76707" />
         <Stat icon={IconBan} value={st.blockedByOthers} label="Bloqueado por" color="#d63939" />
-        <Stat icon={IconCoin} value={`R$ ${Number(bill.estimatedSpend).toFixed(2)}`} label="Gasto estimado" color="#2fb344" />
+        <Stat icon={IconCoin} value={u.credits ?? 0} label="Créditos (saldo)" color="#2fb344" />
       </div>
 
       <div className="row mt-2">
@@ -271,14 +271,13 @@ export default function UserDetail() {
           </div>
 
           <div className="card mb-3">
-            <div className="card-header"><h3 className="card-title"><IconCreditCard size={18} className="me-2" />Financeiro / VIP</h3></div>
+            <div className="card-header"><h3 className="card-title"><IconCreditCard size={18} className="me-2" />VIP e saldos</h3></div>
             <div className="card-body py-2">
               <Row label="Premium" value={bill.isPremium ? "Sim" : "Não"} />
-              <Row label="Plano" value={bill.plan ?? "—"} />
-              <Row label="Valor do plano" value={bill.planPrice ? `R$ ${bill.planPrice.toFixed(2)}` : "—"} />
-              <Row label="Gasto estimado" value={<strong className="text-green">R$ {Number(bill.estimatedSpend).toFixed(2)}</strong>} />
+              <Row label="Plano concedido" value={bill.plan ?? "—"} />
               <Row label="Premium até" value={dia(bill.premiumUntil)} />
               <Row label="Super likes usados hoje" value={u.superLikesUsedToday} />
+              <Row label="Super likes bônus" value={<strong>{u.bonusSuperLikes ?? 0}</strong>} />
               <Row label="Boosts restantes" value={u.boostsRemaining} />
               <Row label="Créditos (saldo)" value={<strong>{u.credits ?? 0}</strong>} />
             </div>

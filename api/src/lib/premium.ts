@@ -5,25 +5,21 @@ import { prisma } from "../config/prisma";
 export const FREE_SUPERLIKES_PER_DAY = 1;
 export const PREMIUM_SUPERLIKES_PER_DAY = 5;
 
-/** Planos VIP disponíveis (duração em dias + rótulos/preços de exibição). */
-export const PREMIUM_PLANS: Record<
-  string,
-  { days: number; label: string; price: string; monthly: string }
-> = {
-  monthly: { days: 30, label: "1 mês", price: "R$ 39,90", monthly: "R$ 39,90/mês" },
-  quarterly: {
-    days: 90,
-    label: "3 meses",
-    price: "R$ 89,90",
-    monthly: "R$ 29,97/mês",
-  },
-  yearly: {
-    days: 365,
-    label: "12 meses",
-    price: "R$ 239,90",
-    monthly: "R$ 19,99/mês",
-  },
-};
+/**
+ * Durações do VIP concedido manualmente pelo painel (não há venda no app).
+ * Os rótulos são exibidos no detalhe do usuário.
+ */
+export const PREMIUM_PLANS = {
+  monthly: { days: 30, label: "Mensal" },
+  quarterly: { days: 90, label: "Trimestral" },
+  yearly: { days: 365, label: "Anual" },
+} as const;
+
+export type PremiumPlanId = keyof typeof PREMIUM_PLANS;
+
+export function isPremiumPlanId(value: string): value is PremiumPlanId {
+  return Object.prototype.hasOwnProperty.call(PREMIUM_PLANS, value);
+}
 
 /** True se o usuário tem premium ativo (flag e/ou dentro da validade). */
 export function isPremiumActive(user: Pick<User, "isPremium" | "premiumUntil">): boolean {
@@ -33,10 +29,17 @@ export function isPremiumActive(user: Pick<User, "isPremium" | "premiumUntil">):
   return false;
 }
 
-function startOfToday(): Date {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d;
+/** Fuso dos limites diários: Brasília (UTC-3; sem horário de verão desde 2019). */
+const DAY_OFFSET_MS = -3 * 60 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Início do "dia" dos limites diários (Super Like e recompensas): meia-noite de
+ * Brasília, independente do fuso do servidor (o container roda em UTC).
+ */
+export function startOfToday(now: Date = new Date()): Date {
+  const local = now.getTime() + DAY_OFFSET_MS;
+  return new Date(Math.floor(local / DAY_MS) * DAY_MS - DAY_OFFSET_MS);
 }
 
 /**
@@ -55,26 +58,34 @@ export async function ensureDailyReset(userId: string): Promise<User> {
   return user;
 }
 
-/** Quantos super likes o usuário ainda tem hoje. */
+/** Quantos Super Likes diários e comprados o usuário ainda possui. */
 export function superLikesLeft(user: User): number {
   const perDay = isPremiumActive(user)
     ? PREMIUM_SUPERLIKES_PER_DAY
     : FREE_SUPERLIKES_PER_DAY;
-  return Math.max(0, perDay - user.superLikesUsedToday);
+  const dailyLeft = Math.max(0, perDay - user.superLikesUsedToday);
+  return dailyLeft + Math.max(0, user.bonusSuperLikes);
 }
 
 /** Resumo do estado premium/limites do usuário (para o app). */
 export function premiumStats(user: User) {
   const premium = isPremiumActive(user);
+  const superLikesPerDay = premium
+    ? PREMIUM_SUPERLIKES_PER_DAY
+    : FREE_SUPERLIKES_PER_DAY;
+  const dailySuperLikesLeft = Math.max(
+    0,
+    superLikesPerDay - user.superLikesUsedToday
+  );
   return {
     isPremium: premium,
     premiumPlan: user.premiumPlan,
     premiumUntil: user.premiumUntil,
-    superLikesPerDay: premium
-      ? PREMIUM_SUPERLIKES_PER_DAY
-      : FREE_SUPERLIKES_PER_DAY,
+    superLikesPerDay,
     superLikesUsedToday: user.superLikesUsedToday,
-    superLikesLeft: superLikesLeft(user),
+    dailySuperLikesLeft,
+    bonusSuperLikes: Math.max(0, user.bonusSuperLikes),
+    superLikesLeft: dailySuperLikesLeft + Math.max(0, user.bonusSuperLikes),
     boostsRemaining: user.boostsRemaining,
     credits: user.credits,
   };

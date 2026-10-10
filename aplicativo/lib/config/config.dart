@@ -155,11 +155,6 @@ class AppConfig {
 /// Authentication Modes
 ///
 
-//!! Backend pronto? Durante a migração para a VPS, deixamos FALSE: o app sobe sem
-//!! Firebase e vai direto para a tela de Login (preview/rebrand). Quando a API da VPS
-//!! estiver no ar, mudar para TRUE e religar auth/dados + FCM.
-const bool kBackendReady = false;
-
 //!! Enable Google Authentication
 const bool isGoogleAuthAvailable = true;
 
@@ -234,7 +229,8 @@ class AndroidAdUnits {
   static const String interstitialId = "ca-app-pub-3940256099942544/1033173712";
 
   //! Admob Android Rewarded Video Ad Id (TESTE)
-  static const String rewardedVideoId = "ca-app-pub-3940256099942544/5224354917";
+  static const String rewardedVideoId =
+      "ca-app-pub-3940256099942544/5224354917";
 }
 
 class IOSAdUnits {

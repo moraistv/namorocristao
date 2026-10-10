@@ -17,6 +17,9 @@ export const upsertProfileSchema = z.object({
   tiktok: z.string().max(60).nullish(),
   twitter: z.string().max(60).nullish(),
   facebook: z.string().max(60).nullish(),
+  latitude: z.number().finite().min(-90).max(90).nullish(),
+  longitude: z.number().finite().min(-180).max(180).nullish(),
+  addressText: z.string().trim().max(160).nullish(),
   // Perguntas de fé (prompts): [{q, a}]
   prompts: z
     .array(z.object({ q: z.string().max(120), a: z.string().max(300) }))
@@ -25,9 +28,9 @@ export const upsertProfileSchema = z.object({
 });
 
 export const locationSchema = z.object({
-  latitude: z.number().min(-90).max(90),
-  longitude: z.number().min(-180).max(180),
-  addressText: z.string().max(160).optional(),
+  latitude: z.number().finite().min(-90).max(90),
+  longitude: z.number().finite().min(-180).max(180),
+  addressText: z.string().trim().max(160).nullish(),
 });
 
 export const preferencesSchema = z.object({

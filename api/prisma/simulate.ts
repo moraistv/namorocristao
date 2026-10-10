@@ -231,8 +231,13 @@ async function upsertPerson(p: P): Promise<string> {
 async function like(fromId: string, toId: string, type: InteractionType) {
   await prisma.interaction.upsert({
     where: { fromUserId_toUserId: { fromUserId: fromId, toUserId: toId } },
-    create: { fromUserId: fromId, toUserId: toId, type },
-    update: { type },
+    create: {
+      fromUserId: fromId,
+      toUserId: toId,
+      type,
+      superLikeUsedBonus: false,
+    },
+    update: { type, superLikeUsedBonus: false },
   });
 }
 

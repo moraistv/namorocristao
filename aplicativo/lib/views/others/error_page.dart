@@ -37,7 +37,7 @@ class ErrorPage extends ConsumerWidget {
                   Navigator.pushAndRemoveUntil(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => const LandingWidget(),
+                      builder: (context) => const SplashScreen(),
                     ),
                     (route) => false,
                   );

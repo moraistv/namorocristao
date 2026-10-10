@@ -1,23 +1,45 @@
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_easyloading/flutter_easyloading.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:mioamoreapp/config/config.dart';
+import 'package:mioamoreapp/helpers/url_launcher_helper.dart';
+import 'package:mioamoreapp/providers/version_provider.dart';
+import 'package:mioamoreapp/services/ads_service.dart';
 import 'package:mioamoreapp/services/app_api.dart';
+import 'package:mioamoreapp/services/push_device_service.dart';
+import 'package:mioamoreapp/services/realtime_bus.dart';
 import 'package:mioamoreapp/services/token_storage.dart';
 import 'package:mioamoreapp/views/app/app_theme.dart';
-import 'package:mioamoreapp/views/app/premium_page.dart';
+import 'package:mioamoreapp/views/app/rewards_page.dart';
 import 'package:mioamoreapp/views/auth/login_page.dart';
 
-/// Configurações da conta: VIP, notificações, privacidade, sair e excluir conta.
-class SettingsPage extends StatefulWidget {
+/// Configurações da conta: recompensas, notificações, privacidade, sair e excluir conta.
+class SettingsPage extends ConsumerStatefulWidget {
   const SettingsPage({super.key});
 
   @override
-  State<SettingsPage> createState() => _SettingsPageState();
+  ConsumerState<SettingsPage> createState() => _SettingsPageState();
 }
 
-class _SettingsPageState extends State<SettingsPage> {
+class _SettingsPageState extends ConsumerState<SettingsPage> {
   bool _isPremium = false;
-  bool _notifications = true;
+  bool _notifications = TokenStorage.notificationsEnabled;
   bool _incognito = false;
+  bool _changingNotifications = false;
+  bool _loggingOut = false;
+
+  String? get _devicePlatform {
+    switch (defaultTargetPlatform) {
+      case TargetPlatform.android:
+        return "android";
+      case TargetPlatform.iOS:
+        return "ios";
+      default:
+        return null;
+    }
+  }
 
   @override
   void initState() {
@@ -27,72 +49,240 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _load() async {
     try {
-      final s = await AppApi.getStats();
-      final p = await AppApi.getMyProfile();
+      final stats = await AppApi.getStats();
+      final profile = await AppApi.getMyProfile();
       if (!mounted) return;
       setState(() {
-        _isPremium = s["isPremium"] == true;
-        _incognito = p?["incognito"] == true;
+        _isPremium = stats["isPremium"] == true;
+        _incognito = profile?["incognito"] == true;
+        _notifications = TokenStorage.notificationsEnabled;
       });
     } catch (_) {}
   }
 
-  Future<void> _toggleIncognito(bool v) async {
-    setState(() => _incognito = v);
+  Future<void> _toggleNotifications(bool enabled) async {
+    if (_changingNotifications) return;
+    setState(() => _changingNotifications = true);
+    var notifiedShell = false;
+
+    void notifyShell() {
+      if (notifiedShell) return;
+      RealtimeBus.notificationsChanged();
+      notifiedShell = true;
+    }
+
     try {
-      await AppApi.setIncognito(v);
-    } on AppApiException catch (e) {
-      if (!mounted) return;
-      setState(() => _incognito = !v); // reverte
-      if (e.statusCode == 403) {
-        await Navigator.push(
-          context,
-          MaterialPageRoute(
-              builder: (_) => const PremiumPage(
-                  highlight: "Modo incógnito é um recurso VIP")),
+      if (!enabled) {
+        final result = await PushDeviceService.disableNotifications();
+        notifyShell();
+        if (!mounted) return;
+        setState(() => _notifications = false);
+        if (result.remoteRemovalPending) {
+          EasyLoading.showInfo(
+            "Notificações desativadas neste aparelho. A limpeza no servidor será tentada novamente.",
+          );
+        } else if (!result.localTokenInvalidated) {
+          EasyLoading.showInfo(
+            "Notificações desativadas no app, mas o token do aparelho não pôde ser invalidado agora.",
+          );
+        } else {
+          EasyLoading.showSuccess("Notificações desativadas.");
+        }
+        return;
+      }
+
+      final platform = _devicePlatform;
+      if (platform == null) {
+        await PushDeviceService.disableNotifications();
+        notifyShell();
+        if (mounted) {
+          setState(() => _notifications = false);
+          EasyLoading.showInfo(
+            "Notificações não estão disponíveis nesta plataforma.",
+          );
+        }
+        return;
+      }
+
+      final settings = await FirebaseMessaging.instance.requestPermission();
+      final allowed =
+          settings.authorizationStatus == AuthorizationStatus.authorized ||
+              settings.authorizationStatus == AuthorizationStatus.provisional;
+      if (!allowed) {
+        await PushDeviceService.disableNotifications();
+        notifyShell();
+        if (mounted) {
+          setState(() => _notifications = false);
+          EasyLoading.showInfo(
+            "Permita notificações nas configurações do aparelho para ativá-las.",
+          );
+        }
+        return;
+      }
+
+      final token = await FirebaseMessaging.instance.getToken();
+      if (token == null || token.isEmpty) {
+        throw AppApiException(
+          "Não foi possível obter o token de notificações.",
+          0,
+          AppApiErrorType.unexpected,
         );
-        _load();
+      }
+
+      await TokenStorage.setNotificationsEnabled(true);
+      final result = await PushDeviceService.registerToken(
+        token,
+        platform: platform,
+      );
+      if (!result.registered) {
+        throw AppApiException(
+          "Não foi possível confirmar a ativação das notificações.",
+          0,
+          AppApiErrorType.unexpected,
+        );
+      }
+
+      notifyShell();
+      if (!mounted) return;
+      setState(() => _notifications = true);
+      if (result.cleanupPending) {
+        EasyLoading.showInfo(
+          "Notificações ativadas. Uma limpeza anterior será tentada novamente.",
+        );
+      }
+    } catch (error) {
+      try {
+        await PushDeviceService.disableNotifications();
+      } catch (cleanupError) {
+        debugPrint(
+          "Não foi possível concluir a limpeza local de push: $cleanupError",
+        );
+      }
+      notifyShell();
+      if (mounted) {
+        setState(() => _notifications = false);
+        EasyLoading.showError(
+          error is AppApiException
+              ? error.message
+              : "Não foi possível alterar as notificações.",
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _changingNotifications = false);
+    }
+  }
+
+  Future<void> _toggleIncognito(bool value) async {
+    setState(() => _incognito = value);
+    try {
+      await AppApi.setIncognito(value);
+    } on AppApiException catch (error) {
+      if (!mounted) return;
+      setState(() => _incognito = !value);
+      if (error.statusCode == 403) {
+        EasyLoading.showInfo("O modo incógnito é um recurso exclusivo VIP.");
       } else {
-        EasyLoading.showError(e.message);
+        EasyLoading.showError(error.message);
       }
     }
   }
 
-  Future<void> _logout() async {
-    await AppApi.setOnline(false);
-    await TokenStorage.clear();
+  Future<void> _setOfflineForLogout() async {
+    try {
+      await AppApi.setOnline(false).timeout(const Duration(seconds: 2));
+    } catch (error) {
+      debugPrint("Não foi possível encerrar a presença no logout: $error");
+    }
+  }
+
+  Future<void> _cleanupPushForLogout() async {
+    try {
+      await PushDeviceService.cleanupForLogout();
+    } catch (error) {
+      debugPrint("A limpeza remota de push ficou pendente: $error");
+    }
+  }
+
+  Future<void> _logout({
+    required int expectedGeneration,
+    required String? expectedAccessToken,
+    required String? expectedRefreshToken,
+  }) async {
+    if (_loggingOut ||
+        TokenStorage.sessionGeneration != expectedGeneration ||
+        TokenStorage.accessToken != expectedAccessToken ||
+        TokenStorage.refreshToken != expectedRefreshToken) {
+      return;
+    }
+    _loggingOut = true;
+    await Future.wait<void>([
+      _setOfflineForLogout(),
+      _cleanupPushForLogout(),
+    ]);
+    final cleared = await TokenStorage.clearIfCurrent(
+      expectedGeneration: expectedGeneration,
+      expectedAccessToken: expectedAccessToken,
+      expectedRefreshToken: expectedRefreshToken,
+    );
     if (!mounted) return;
+    if (!cleared && TokenStorage.isLoggedIn) return;
+    if (TokenStorage.sessionGeneration != expectedGeneration + 1) return;
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(builder: (_) => const LoginPage()),
-      (r) => false,
+      (route) => false,
     );
   }
 
   Future<void> _confirmLogout() async {
-    final ok = await _confirm("Sair da conta", "Deseja realmente sair?");
-    if (ok) _logout();
+    final expectedGeneration = TokenStorage.sessionGeneration;
+    final expectedAccessToken = TokenStorage.accessToken;
+    final expectedRefreshToken = TokenStorage.refreshToken;
+    final confirmed = await _confirm("Sair da conta", "Deseja realmente sair?");
+    if (confirmed) {
+      await _logout(
+        expectedGeneration: expectedGeneration,
+        expectedAccessToken: expectedAccessToken,
+        expectedRefreshToken: expectedRefreshToken,
+      );
+    }
   }
 
   Future<void> _deleteAccount() async {
-    final ok = await _confirm(
+    final expectedGeneration = TokenStorage.sessionGeneration;
+    final expectedAccessToken = TokenStorage.accessToken;
+    final expectedRefreshToken = TokenStorage.refreshToken;
+    final confirmed = await _confirm(
       "Excluir conta",
       "Sua conta e seus dados serão removidos. Esta ação não pode ser desfeita. Continuar?",
       danger: true,
     );
-    if (!ok) return;
+    if (!confirmed ||
+        TokenStorage.sessionGeneration != expectedGeneration ||
+        TokenStorage.accessToken != expectedAccessToken ||
+        TokenStorage.refreshToken != expectedRefreshToken) {
+      return;
+    }
     EasyLoading.show(status: "Processando...");
     try {
       await AppApi.requestAccountDeletion();
       EasyLoading.dismiss();
-      _logout();
+      await _logout(
+        expectedGeneration: expectedGeneration,
+        expectedAccessToken: expectedAccessToken,
+        expectedRefreshToken: expectedRefreshToken,
+      );
+    } on AppApiException catch (error) {
+      EasyLoading.dismiss();
+      EasyLoading.showError(error.message);
     } catch (_) {
       EasyLoading.dismiss();
       EasyLoading.showError("Falha ao solicitar exclusão");
     }
   }
 
-  Future<bool> _confirm(String title, String body, {bool danger = false}) async {
+  Future<bool> _confirm(String title, String body,
+      {bool danger = false}) async {
     return await showDialog<bool>(
           context: context,
           builder: (_) => AlertDialog(
@@ -105,10 +295,13 @@ class _SettingsPageState extends State<SettingsPage> {
               ),
               TextButton(
                 onPressed: () => Navigator.pop(context, true),
-                child: Text(danger ? "Excluir" : "Confirmar",
-                    style: TextStyle(
-                        color: danger ? Colors.red : AppTheme.navy,
-                        fontWeight: FontWeight.bold)),
+                child: Text(
+                  danger ? "Excluir" : "Confirmar",
+                  style: TextStyle(
+                    color: danger ? Colors.red : AppTheme.navy,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
             ],
           ),
@@ -116,93 +309,187 @@ class _SettingsPageState extends State<SettingsPage> {
         false;
   }
 
+  Uri? _configuredUrl(String value) {
+    final uri = Uri.tryParse(value.trim());
+    if (uri == null || uri.scheme != "https" || uri.host.isEmpty) {
+      return null;
+    }
+    return uri;
+  }
+
   @override
   Widget build(BuildContext context) {
+    final version = ref.watch(versionProvider).when(
+          data: (value) => value,
+          loading: () => "carregando versão...",
+          error: (_, __) => "versão indisponível",
+        );
+    final privacyUrl = _configuredUrl(privacyPolicyUrl);
+    final termsUrl = _configuredUrl(termsAndConditionsUrl);
+
     return Scaffold(
       backgroundColor: AppTheme.bg,
       appBar: AppBar(
         backgroundColor: Colors.white,
         foregroundColor: AppTheme.navy,
         elevation: 0,
-        title: const Text("Configurações",
-            style: TextStyle(fontWeight: FontWeight.bold)),
+        title: const Text(
+          "Configurações",
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
       ),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          GestureDetector(
-            onTap: () async {
-              await Navigator.push(
-                context,
-                MaterialPageRoute(builder: (_) => const PremiumPage()),
-              );
-              _load();
-            },
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                    colors: [AppTheme.navy, Color(0xFF1E2C5A)]),
+          if (_isPremium || AdsService.rewardedAvailable) ...[
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
                 borderRadius: BorderRadius.circular(16),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.workspace_premium, color: AppTheme.gold, size: 28),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      _isPremium ? "Você é VIP 👑" : "Seja VIP",
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 16),
+                onTap: _isPremium
+                    ? null
+                    : () async {
+                        await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => const RewardsPage(),
+                          ),
+                        );
+                        if (mounted) _load();
+                      },
+                child: Ink(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [AppTheme.navy, Color(0xFF1E2C5A)],
                     ),
+                    borderRadius: BorderRadius.circular(16),
                   ),
-                  const Icon(Icons.chevron_right, color: Colors.white54),
-                ],
+                  child: Row(
+                    children: [
+                      Icon(
+                        _isPremium
+                            ? Icons.workspace_premium
+                            : Icons.play_circle_fill_rounded,
+                        color: AppTheme.gold,
+                        size: 28,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _isPremium
+                              ? "Você é VIP 👑"
+                              : "Ganhe recompensas assistindo anúncios",
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                      ),
+                      if (!_isPremium)
+                        const Icon(Icons.chevron_right, color: Colors.white54),
+                    ],
+                  ),
+                ),
               ),
             ),
+            const SizedBox(height: 20),
+          ],
+          _section("Conta"),
+          _tile(
+            Icons.email_outlined,
+            "E-mail",
+            subtitle: TokenStorage.email ?? "—",
+          ),
+          _switchTile(
+            Icons.notifications_outlined,
+            "Notificações",
+            _notifications,
+            _changingNotifications ? null : _toggleNotifications,
           ),
           const SizedBox(height: 20),
-          _section("Conta"),
-          _tile(Icons.email_outlined, "E-mail",
-              subtitle: TokenStorage.email ?? "—"),
-          _switchTile(Icons.notifications_outlined, "Notificações", _notifications,
-              (v) => setState(() => _notifications = v)),
-          const SizedBox(height: 20),
           _section("Privacidade & Segurança"),
-          _switchTile(Icons.visibility_off_outlined, "Modo incógnito", _incognito,
-              _toggleIncognito),
-          _tile(Icons.lock_outline, "Política de privacidade", onTap: () {}),
-          _tile(Icons.description_outlined, "Termos de uso", onTap: () {}),
-          _tile(Icons.shield_outlined, "Dicas de segurança", onTap: () {}),
+          _switchTile(
+            Icons.visibility_off_outlined,
+            "Modo incógnito",
+            _incognito,
+            _toggleIncognito,
+          ),
+          _tile(
+            Icons.lock_outline,
+            "Política de privacidade",
+            subtitle: privacyUrl == null
+                ? "Link ainda não configurado"
+                : "Abrir no navegador",
+            onTap: privacyUrl == null
+                ? null
+                : () => UrlLauncherHelper.launchURL(privacyUrl),
+          ),
+          _tile(
+            Icons.description_outlined,
+            "Termos de uso",
+            subtitle: termsUrl == null
+                ? "Link ainda não configurado"
+                : "Abrir no navegador",
+            onTap: termsUrl == null
+                ? null
+                : () => UrlLauncherHelper.launchURL(termsUrl),
+          ),
+          _tile(
+            Icons.shield_outlined,
+            "Dicas de segurança",
+            subtitle: "Conteúdo ainda não configurado",
+          ),
           const SizedBox(height: 20),
           _section("Sessão"),
           _tile(Icons.logout, "Sair da conta", onTap: _confirmLogout),
-          _tile(Icons.delete_outline, "Excluir minha conta",
-              danger: true, onTap: _deleteAccount),
+          _tile(
+            Icons.delete_outline,
+            "Excluir minha conta",
+            danger: true,
+            onTap: _deleteAccount,
+          ),
           const SizedBox(height: 30),
-          const Center(
-            child: Text("Namoro Cristão • v1.0.0",
-                style: TextStyle(color: Color(0xFF9AA1B2), fontSize: 12)),
+          Center(
+            child: Text(
+              "Namoro Cristão • $version",
+              style: const TextStyle(
+                color: Color(0xFF9AA1B2),
+                fontSize: 12,
+              ),
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _section(String t) => Padding(
+  Widget _section(String title) => Padding(
         padding: const EdgeInsets.only(left: 4, bottom: 8),
-        child: Text(t,
-            style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                color: AppTheme.navy,
-                fontSize: 15)),
+        child: Text(
+          title,
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+            color: AppTheme.navy,
+            fontSize: 15,
+          ),
+        ),
       );
 
-  Widget _tile(IconData icon, String title,
-      {String? subtitle, VoidCallback? onTap, bool danger = false}) {
-    final color = danger ? Colors.red : AppTheme.navy;
+  Widget _tile(
+    IconData icon,
+    String title, {
+    String? subtitle,
+    VoidCallback? onTap,
+    bool danger = false,
+  }) {
+    final enabled = onTap != null || subtitle == null;
+    final color = danger
+        ? Colors.red
+        : enabled
+            ? AppTheme.navy
+            : const Color(0xFF7A849C);
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
@@ -211,9 +498,19 @@ class _SettingsPageState extends State<SettingsPage> {
         border: Border.all(color: const Color(0xFFEDEFF4)),
       ),
       child: ListTile(
-        leading: Icon(icon, color: danger ? Colors.red : AppTheme.gold),
-        title: Text(title,
-            style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+        enabled: enabled,
+        leading: Icon(
+          icon,
+          color: danger
+              ? Colors.red
+              : enabled
+                  ? AppTheme.gold
+                  : const Color(0xFFB4BAC8),
+        ),
+        title: Text(
+          title,
+          style: TextStyle(color: color, fontWeight: FontWeight.w600),
+        ),
         subtitle: subtitle != null ? Text(subtitle) : null,
         trailing: onTap != null
             ? const Icon(Icons.chevron_right, color: Color(0xFF9AA1B2))
@@ -224,7 +521,11 @@ class _SettingsPageState extends State<SettingsPage> {
   }
 
   Widget _switchTile(
-      IconData icon, String title, bool value, ValueChanged<bool> onChanged) {
+    IconData icon,
+    String title,
+    bool value,
+    ValueChanged<bool>? onChanged,
+  ) {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
@@ -234,9 +535,13 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
       child: SwitchListTile(
         secondary: Icon(icon, color: AppTheme.gold),
-        title: Text(title,
-            style: const TextStyle(
-                color: AppTheme.navy, fontWeight: FontWeight.w600)),
+        title: Text(
+          title,
+          style: const TextStyle(
+            color: AppTheme.navy,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
         value: value,
         activeColor: AppTheme.gold,
         onChanged: onChanged,

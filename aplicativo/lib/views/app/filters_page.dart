@@ -76,7 +76,8 @@ class _FiltersPageState extends State<FiltersPage> {
         actions: [
           TextButton(
             onPressed: () => setState(() => f = DiscoverFilters()),
-            child: const Text("Limpar", style: TextStyle(color: Color(0xFF7A849C))),
+            child: const Text("Limpar",
+                style: TextStyle(color: Color(0xFF7A849C))),
           ),
         ],
       ),
@@ -148,14 +149,16 @@ class _FiltersPageState extends State<FiltersPage> {
           const SizedBox(height: 22),
           _title("Intenção  ⭐ VIP"),
           Wrap(spacing: 8, runSpacing: 8, children: [
-            for (final it in kIntentions) _singleChip(it, f.intention,
-                (v) => setState(() => f.intention = v)),
+            for (final it in kIntentions)
+              _singleChip(
+                  it, f.intention, (v) => setState(() => f.intention = v)),
           ]),
           const SizedBox(height: 22),
           _title("Frequência à igreja  ⭐ VIP"),
           Wrap(spacing: 8, runSpacing: 8, children: [
-            for (final c in kChurchFrequency) _singleChip(c, f.churchFrequency,
-                (v) => setState(() => f.churchFrequency = v)),
+            for (final c in kChurchFrequency)
+              _singleChip(c, f.churchFrequency,
+                  (v) => setState(() => f.churchFrequency = v)),
           ]),
           const SizedBox(height: 28),
           SizedBox(
@@ -181,7 +184,9 @@ class _FiltersPageState extends State<FiltersPage> {
         padding: const EdgeInsets.only(bottom: 10),
         child: Text(t,
             style: const TextStyle(
-                fontWeight: FontWeight.bold, fontSize: 16, color: AppTheme.navy)),
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+                color: AppTheme.navy)),
       );
 
   Widget _genderChip(String label, String? value) {
@@ -196,12 +201,13 @@ class _FiltersPageState extends State<FiltersPage> {
     return AppChoiceChip(
       label: label,
       selected: set.contains(label),
-      onTap: () =>
-          setState(() => set.contains(label) ? set.remove(label) : set.add(label)),
+      onTap: () => setState(
+          () => set.contains(label) ? set.remove(label) : set.add(label)),
     );
   }
 
-  Widget _singleChip(String label, String? current, void Function(String?) onPick) {
+  Widget _singleChip(
+      String label, String? current, void Function(String?) onPick) {
     final selected = current == label;
     return AppChoiceChip(
       label: label,

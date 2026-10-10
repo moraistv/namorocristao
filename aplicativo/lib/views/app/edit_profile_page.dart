@@ -12,9 +12,12 @@ class EditProfilePage extends StatefulWidget {
 }
 
 class _EditProfilePageState extends State<EditProfilePage> {
-  late final _name = TextEditingController(text: widget.profile["fullName"]?.toString() ?? "");
-  late final _city = TextEditingController(text: widget.profile["city"]?.toString() ?? "");
-  late final _about = TextEditingController(text: widget.profile["about"]?.toString() ?? "");
+  late final _name =
+      TextEditingController(text: widget.profile["fullName"]?.toString() ?? "");
+  late final _city =
+      TextEditingController(text: widget.profile["city"]?.toString() ?? "");
+  late final _about =
+      TextEditingController(text: widget.profile["about"]?.toString() ?? "");
   late String? _denomination = widget.profile["denomination"]?.toString();
   late String? _frequency = widget.profile["churchFrequency"]?.toString();
   late String? _intention = widget.profile["intention"]?.toString();
@@ -35,27 +38,37 @@ class _EditProfilePageState extends State<EditProfilePage> {
       EasyLoading.showError("Informe seu nome");
       return;
     }
-    final p = widget.profile;
+    final profile = widget.profile;
+    final city = _city.text.trim().isEmpty ? null : _city.text.trim();
+    final originalCity = profile["city"]?.toString();
+    final addressText =
+        city == originalCity ? profile["addressText"]?.toString() : city;
     EasyLoading.show(status: "Salvando...");
     try {
       await AppApi.upsertProfile({
         "fullName": _name.text.trim(),
-        "gender": p["gender"],
-        "birthday": p["birthday"],
-        "city": _city.text.trim().isEmpty ? null : _city.text.trim(),
-        "addressText": p["addressText"],
+        "gender": profile["gender"],
+        "birthday": profile["birthday"],
+        "city": city,
+        "addressText": addressText,
+        if (profile["latitude"] is num) "latitude": profile["latitude"],
+        if (profile["longitude"] is num) "longitude": profile["longitude"],
         "denomination": _denomination,
         "churchFrequency": _frequency,
         "intention": _intention,
         "interests": _interests.toList(),
         "about": _about.text.trim().isEmpty ? null : _about.text.trim(),
-        "mediaFiles": (p["mediaFiles"] as List?)?.cast<String>() ?? [],
-        "lockedPhotos": (p["lockedPhotos"] as List?)?.cast<String>() ?? [],
-        "profilePicture": p["profilePicture"],
+        "mediaFiles": (profile["mediaFiles"] as List?)?.cast<String>() ?? [],
+        "lockedPhotos":
+            (profile["lockedPhotos"] as List?)?.cast<String>() ?? [],
+        "profilePicture": profile["profilePicture"],
       });
       EasyLoading.dismiss();
       if (!mounted) return;
       Navigator.pop(context, true);
+    } on AppApiException catch (error) {
+      EasyLoading.dismiss();
+      EasyLoading.showError(error.message);
     } catch (_) {
       EasyLoading.dismiss();
       EasyLoading.showError("Falha ao salvar");
@@ -76,7 +89,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
             onPressed: _save,
             child: Text("Salvar",
                 style: TextStyle(
-                    color: AppTheme.gold, fontWeight: FontWeight.bold, fontSize: 16)),
+                    color: AppTheme.gold,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16)),
           ),
         ],
       ),
@@ -89,13 +104,18 @@ class _EditProfilePageState extends State<EditProfilePage> {
           TextField(controller: _city, decoration: _dec("Sua cidade")),
           _label("Sobre"),
           TextField(
-              controller: _about, maxLines: 4, decoration: _dec("Fale sobre você...")),
+              controller: _about,
+              maxLines: 4,
+              decoration: _dec("Fale sobre você...")),
           _label("Denominação"),
-          _chips(kDenominations, _denomination, (v) => setState(() => _denomination = v)),
+          _chips(kDenominations, _denomination,
+              (v) => setState(() => _denomination = v)),
           _label("Frequência à igreja"),
-          _chips(kChurchFrequency, _frequency, (v) => setState(() => _frequency = v)),
+          _chips(kChurchFrequency, _frequency,
+              (v) => setState(() => _frequency = v)),
           _label("Intenção"),
-          _chips(kIntentions, _intention, (v) => setState(() => _intention = v)),
+          _chips(
+              kIntentions, _intention, (v) => setState(() => _intention = v)),
           _label("Interesses (até 5)"),
           _multi(kInterests, _interests),
           const SizedBox(height: 28),
@@ -134,10 +154,13 @@ class _EditProfilePageState extends State<EditProfilePage> {
         padding: const EdgeInsets.only(top: 18, bottom: 8),
         child: Text(t,
             style: const TextStyle(
-                fontWeight: FontWeight.bold, color: AppTheme.navy, fontSize: 15)),
+                fontWeight: FontWeight.bold,
+                color: AppTheme.navy,
+                fontSize: 15)),
       );
 
-  Widget _chips(List<String> opts, String? sel, void Function(String) onTap) => Wrap(
+  Widget _chips(List<String> opts, String? sel, void Function(String) onTap) =>
+      Wrap(
         spacing: 8,
         runSpacing: 8,
         children: opts

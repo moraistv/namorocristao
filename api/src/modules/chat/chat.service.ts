@@ -65,7 +65,7 @@ export async function sendMessage(params: {
       : content.slice(0, 80);
   pushOnly(otherId, sender?.fullName ?? "Nova mensagem", preview, { matchId, type: "message" });
 
-  // Se o destinatário for um BOT/Modelo, ele responde sozinho (regra → IA → fallback).
+  // Se o destinatário for um bot, a IA conduz quando ativa; regra/fallback cobrem falhas.
   triggerBotReply({
     matchId,
     botUserId: otherId,
@@ -86,14 +86,22 @@ export async function sendGift(params: { senderId: string; matchId: string; gift
   if (!gift || !gift.active) throw new AppError("Presente indisponível", 404);
 
   const result = await prisma.$transaction(async (tx) => {
-    const sender = await tx.user.findUnique({ where: { id: senderId } });
-    if (!sender) throw new AppError("Usuário não encontrado", 404);
-    if (sender.credits < gift.costCredits) {
+    // Débito condicionado ao saldo: dois envios simultâneos não deixam negativo.
+    const debited = await tx.user.updateMany({
+      where: { id: senderId, credits: { gte: gift.costCredits } },
+      data: { credits: { decrement: gift.costCredits } },
+    });
+    if (debited.count !== 1) {
+      const exists = await tx.user.findUnique({
+        where: { id: senderId },
+        select: { id: true },
+      });
+      if (!exists) throw new AppError("Usuário não encontrado", 404);
       throw new AppError("Créditos insuficientes", 402);
     }
-    const updated = await tx.user.update({
+    const updated = await tx.user.findUniqueOrThrow({
       where: { id: senderId },
-      data: { credits: { decrement: gift.costCredits } },
+      select: { credits: true },
     });
     const message = await tx.message.create({
       data: {

@@ -75,81 +75,118 @@ enum BotPersonality {
   EXTROVERT
 }
 
+enum BotBroadcastStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum BotBroadcastRecipientStatus {
+  PENDING
+  PROCESSING
+  SENT
+  SKIPPED
+  FAILED
+}
+
+/// O que um anúncio premiado concede ao usuário.
+enum RewardKind {
+  SUPERLIKES
+  BOOSTS
+  CREDITS
+}
+
+enum RewardClaimStatus {
+  PENDING
+  GRANTED
+  EXPIRED
+}
+
 // ─────────────────────── Usuários do app ───────────────────────
 
 model User {
-  id           String       @id @default(uuid())
-  email        String       @unique
-  emailVerified Boolean     @default(false)
-  passwordHash String?
-  provider     AuthProvider @default(EMAIL)
-  googleId     String?      @unique
-  isBanned     Boolean      @default(false)
-  suspendedUntil DateTime?
-  isPremium    Boolean      @default(false)
-  premiumPlan  String?      // "monthly" | "quarterly" | "yearly"
-  premiumUntil DateTime?
-  superLikesUsedToday Int   @default(0)
+  id                  String          @id @default(uuid())
+  email               String          @unique
+  emailVerified       Boolean         @default(false)
+  passwordHash        String?
+  provider            AuthProvider    @default(EMAIL)
+  googleId            String?         @unique
+  isBanned            Boolean         @default(false)
+  suspendedUntil      DateTime?
+  isPremium           Boolean         @default(false)
+  premiumPlan         String? // "monthly" | "quarterly" | "yearly"
+  premiumUntil        DateTime?
+  superLikesUsedToday Int             @default(0)
   superLikesResetAt   DateTime?
-  boostsRemaining     Int   @default(0)
-  credits             Int   @default(0)
-  // Bot / Modelo (perfil controlado pelo sistema, responde sozinho)
-  isBot          Boolean         @default(false)
-  botPersonality BotPersonality?
-  botAiEnabled   Boolean         @default(false)
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  deletedAt    DateTime?
+  bonusSuperLikes     Int             @default(0)
+  boostsRemaining     Int             @default(0)
+  credits             Int             @default(0)
+  // Bot / perfil virtual controlado pelo sistema
+  isBot               Boolean         @default(false)
+  botPersonality      BotPersonality?
+  botAiEnabled        Boolean         @default(false)
+  botSystemPrompt     String?
+  botAiModel          String?
+  botAiModelProvider  String?
+  botTemperature      Float           @default(0.75)
+  botMemoryEnabled    Boolean         @default(true)
+  botMemoryEpoch      Int             @default(0)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  deletedAt           DateTime?
 
-  profile Profile?
+  profile        Profile?
+  adRewardClaims AdRewardClaim[]
 
+  @@index([isBot, deletedAt])
   @@map("users")
 }
 
 model Profile {
-  id              String   @id @default(uuid())
-  userId          String   @unique
-  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id     String @id @default(uuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  fullName        String
-  gender          Gender
-  birthday        DateTime
-  about           String?
+  fullName  String
+  gender    Gender
+  birthday  DateTime
+  about     String?
   // Intenção (namoro sério, amizade, casamento) — era "myPurpose" no template
-  intention       String?
+  intention String?
 
   // Campos cristãos
   denomination    String?
   churchFrequency String?
 
-  city            String?
-  interests       String[] @default([])
-  mediaFiles      String[] @default([])
-  lockedPhotos    String[] @default([])
-  profilePicture  String?
+  city           String?
+  interests      String[] @default([])
+  mediaFiles     String[] @default([])
+  lockedPhotos   String[] @default([])
+  profilePicture String?
 
   // Redes sociais (opcionais)
-  instagram       String?
-  tiktok          String?
-  twitter         String?
-  facebook        String?
+  instagram String?
+  tiktok    String?
+  twitter   String?
+  facebook  String?
 
   // Localização
-  latitude        Float?
-  longitude       Float?
-  addressText     String?
+  latitude    Float?
+  longitude   Float?
+  addressText String?
 
-  isVerified      Boolean  @default(false)
-  isOnline        Boolean  @default(false)
-  lastActiveAt    DateTime?
+  isVerified   Boolean   @default(false)
+  isOnline     Boolean   @default(false)
+  lastActiveAt DateTime?
 
   // Recursos premium / engajamento
-  boostUntil      DateTime?          // em destaque na descoberta até esta hora
-  incognito       Boolean  @default(false) // não aparece na descoberta (só quem ele curtiu)
-  prompts         Json?              // perguntas de fé: [{q, a}]
+  boostUntil DateTime? // em destaque na descoberta até esta hora
+  incognito  Boolean   @default(false) // não aparece na descoberta (só quem ele curtiu)
+  prompts    Json? // perguntas de fé: [{q, a}]
 
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@map("profiles")
 }
@@ -171,12 +208,13 @@ model Admin {
 // ─────────────────────── Descoberta / Match / Chat ───────────────────────
 
 model Interaction {
-  id         String          @id @default(uuid())
-  fromUserId String
-  toUserId   String
-  type       InteractionType
-  note       String?
-  createdAt  DateTime        @default(now())
+  id                 String          @id @default(uuid())
+  fromUserId         String
+  toUserId           String
+  type               InteractionType
+  note               String?
+  superLikeUsedBonus Boolean?        @default(false)
+  createdAt          DateTime        @default(now())
 
   @@unique([fromUserId, toUserId])
   @@index([toUserId])
@@ -184,13 +222,14 @@ model Interaction {
 }
 
 model Match {
-  id        String    @id @default(uuid())
+  id        String   @id @default(uuid())
   userAId   String
   userBId   String
-  isActive  Boolean   @default(true)
-  createdAt DateTime  @default(now())
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
 
-  messages  Message[]
+  messages              Message[]
+  botConversationMemory BotConversationMemory?
 
   @@unique([userAId, userBId])
   @@index([userAId])
@@ -310,12 +349,12 @@ model AppSettings {
   id                           Int      @id @default(1)
   isChattingEnabledBeforeMatch Boolean  @default(false)
   // Flags/parâmetros de recursos (gerenciados no painel)
-  boostDurationMin       Int     @default(30)
-  superLikeMessageEnabled Boolean @default(true)
-  rewindPremiumOnly      Boolean  @default(true)
-  incognitoPremiumOnly   Boolean  @default(true)
-  dailyVerseEnabled      Boolean  @default(true)
-  freeDailyLikes         Int      @default(0) // 0 = ilimitado p/ grátis
+  boostDurationMin             Int      @default(30)
+  superLikeMessageEnabled      Boolean  @default(true)
+  rewindPremiumOnly            Boolean  @default(true)
+  incognitoPremiumOnly         Boolean  @default(true)
+  dailyVerseEnabled            Boolean  @default(true)
+  freeDailyLikes               Int      @default(0) // 0 = ilimitado p/ grátis
   updatedAt                    DateTime @updatedAt
 
   @@map("app_settings")
@@ -323,7 +362,7 @@ model AppSettings {
 
 model DailyVerse {
   id        String   @id @default(uuid())
-  reference String   // ex.: "Provérbios 3:5"
+  reference String // ex.: "Provérbios 3:5"
   text      String
   active    Boolean  @default(true)
   sortOrder Int      @default(0)
@@ -372,15 +411,18 @@ model AccessLog {
   userId    String
   ip        String?
   userAgent String?
-  action    String   // register | login | login_code | google
+  action    String // register | login | login_code | google
   createdAt DateTime @default(now())
 
   @@index([userId])
   @@map("access_logs")
 }
 
-// ─────────────────────── Monetização (planos, créditos, presentes, anúncios) ───────────────────────
+// ─────────────────────── Monetização (presentes, anúncios, recompensas) ───────────────────────
 
+// LEGADO: Product/ProductKind/MonetizationSettings pertenciam à loja paga, removida
+// do app, da API e do painel. As tabelas seguem no banco apenas para preservar o
+// histórico; remover em uma migration futura, depois de um backup.
 enum ProductKind {
   PREMIUM
   CREDITS
@@ -418,8 +460,8 @@ model Gift {
 }
 
 model AdSettings {
-  id      Int     @id @default(1)
-  enabled Boolean @default(false)
+  id            Int     @id @default(1)
+  enabled       Boolean @default(false)
   testMode      Boolean @default(true)
   testDeviceIds String?
 
@@ -457,9 +499,60 @@ model AdSettings {
   maxAdsPerSession Int @default(0)
   maxAdsPerDay     Int @default(0)
 
+  // Recompensas por anúncio premiado
+  rewardsRequireSsv    Boolean   @default(false) // true = só credita após o callback SSV do Google
+  rewardsMaxPerDay     Int       @default(0) // teto de recompensas por usuário/dia (0 = sem teto)
+  rewardsSsvAdUnit     String? // ad_unit esperado no callback SSV; vazio = não confere, mas é obrigatório para exigir o SSV. Zerado quando o bloco Premiado muda
+  rewardsSsvLastAt     DateTime? // último callback SSV aceito (assinado pelo Google e ligado a um resgate nosso). Zerado quando o bloco Premiado muda
+  rewardsSsvLastAdUnit String? // ad_unit desse último callback aceito
+
   updatedAt DateTime @updatedAt
 
   @@map("ad_settings")
+}
+
+/// Oferta de recompensa por anúncio premiado (configurada no painel).
+model AdReward {
+  id           String     @id @default(uuid())
+  kind         RewardKind
+  title        String
+  description  String?
+  amount       Int        @default(1) // unidades concedidas por anúncio assistido
+  dailyLimit   Int        @default(5) // anúncios por usuário/dia (0 = sem limite)
+  cooldownSecs Int        @default(0) // espera entre dois anúncios desta oferta
+  active       Boolean    @default(true)
+  sortOrder    Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  claims AdRewardClaim[]
+
+  @@map("ad_rewards")
+}
+
+/// Um anúncio premiado iniciado pelo usuário. GRANTED = recompensa creditada.
+model AdRewardClaim {
+  id            String            @id @default(uuid())
+  userId        String
+  rewardId      String
+  kind          RewardKind // cópia da oferta no momento do início
+  amount        Int // cópia da oferta no momento do início
+  status        RewardClaimStatus @default(PENDING)
+  verifiedBy    String? // "ssv" (Google) | "client" (app)
+  transactionId String?           @unique // transaction_id do SSV (anti-replay)
+  expiresAt     DateTime
+  createdAt     DateTime          @default(now())
+  grantedAt     DateTime?
+
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  // Restrict: o histórico de resgates (base dos limites diários) não some ao excluir a oferta.
+  reward AdReward @relation(fields: [rewardId], references: [id], onDelete: Restrict)
+
+  @@index([userId, status, grantedAt])
+  @@index([rewardId])
+  @@index([status, grantedAt])
+  @@index([status, createdAt])
+  @@map("ad_reward_claims")
 }
 
 model MonetizationSettings {
@@ -475,7 +568,7 @@ model MonetizationSettings {
 
 model ChatbotRule {
   id          String         @id @default(uuid())
-  category    String         // ex.: "saudacao", "elogio"
+  category    String // ex.: "saudacao", "elogio"
   personality BotPersonality @default(ALL)
   priority    Int            @default(5) // 0–10 (maior ganha)
   keywords    String[]       @default([])
@@ -489,68 +582,128 @@ model ChatbotRule {
 
 model ChatbotLog {
   id              String   @id @default(uuid())
-  userId          String   // quem enviou a mensagem
+  userId          String // quem enviou a mensagem
   botUserId       String?
   message         String
-  matchedCategory String?  // null = fallback (sem regra)
+  matchedCategory String?
   usedAi          Boolean  @default(false)
+  responseSource  String   @default("FALLBACK") // AI | RULE | FALLBACK
+  latencyMs       Int?
   language        String   @default("pt")
   createdAt       DateTime @default(now())
 
   @@index([createdAt])
+  @@index([responseSource, createdAt])
+  @@index([botUserId, createdAt])
   @@map("chatbot_logs")
 }
 
 model BotSettings {
-  id             Int      @id @default(1)
-  aiEnabled      Boolean  @default(false)
-  aiProvider     String   @default("openai")
-  aiModel        String   @default("gpt-4o-mini")
-  aiApiKey       String?
-  aiSystemPrompt String   @default("Voce e uma pessoa crista simpatica em um app de namoro. Responda de forma curta, calorosa e natural, em portugues do Brasil.")
-  replyMinMs     Int      @default(1200) // atraso minimo da resposta (parece humano)
-  replyMaxMs     Int      @default(3500) // atraso maximo
-  fallbackText   String   @default("Que interessante! Me conta mais sobre voce 😊")
-  updatedAt      DateTime @updatedAt
+  id                    Int      @id @default(1)
+  aiEnabled             Boolean  @default(false)
+  aiProvider            String   @default("deepseek")
+  aiModel               String   @default("deepseek-chat")
+  aiApiKey              String?
+  aiApiKeyProvider      String?
+  aiSystemPrompt        String   @default("Voce e um perfil virtual cristao identificado como IA. Converse com respeito, acolhimento e transparencia, em portugues do Brasil.")
+  replyMinMs            Int      @default(1200)
+  replyMaxMs            Int      @default(3500)
+  fallbackText          String   @default("Que interessante! Me conta mais sobre voce 😊")
+  memoryEnabled         Boolean  @default(true)
+  memoryRefreshMessages Int      @default(8)
+  recentMessageLimit    Int      @default(24)
+  updatedAt             DateTime @updatedAt
 
   @@map("bot_settings")
+}
+
+model BotConversationMemory {
+  id                String   @id @default(uuid())
+  matchId           String   @unique
+  match             Match    @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  botUserId         String
+  userId            String
+  summary           String   @default("")
+  knownFacts        String[] @default([])
+  relationshipStage String   @default("initial")
+  messageCount      Int      @default(0)
+  lastMessageAt     DateTime @default(now())
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([botUserId, lastMessageAt])
+  @@index([userId, lastMessageAt])
+  @@map("bot_conversation_memories")
 }
 
 // ─────────────────────── Histórico de Broadcasts / Disparos ───────────────────────
 
 model BotBroadcast {
-  id          String   @id @default(uuid())
-  botUserId   String   // modelo que enviou
-  audience    String   // all | free | premium | online
-  messageType String   @default("text") // text | image
-  text        String?  // mensagem de texto
-  imageUrl    String?  // URL da imagem
-  targetedCount Int    @default(0) // quantos usuários foram selecionados
-  sentCount     Int    @default(0) // quantos realmente receberam
-  deliveredCount Int   @default(0) // quantos confirmaram recebimento (push delivered)
-  clickedCount   Int   @default(0) // quantos clicaram na notificação
-  createdAt      DateTime @default(now())
-  sentAt         DateTime? // quando foi disparado (null = agendado/rascunho)
+  id             String             @id @default(uuid())
+  idempotencyKey String             @unique
+  requestHash    String
+  botUserId      String // modelo que enviou
+  audience       String // all | free | premium | online
+  recipientLimit Int                @default(500)
+  messageType    String             @default("text") // text | image
+  text           String? // mensagem de texto
+  imageUrl       String? // URL da imagem
+  status         BotBroadcastStatus @default(PENDING)
+  targetedCount  Int                @default(0) // quantos usuários foram selecionados
+  sentCount      Int                @default(0) // quantas mensagens foram persistidas
+  deliveredCount Int                @default(0) // reservado para confirmação real de entrega
+  clickedCount   Int                @default(0) // quantos clicaram na notificação
+  leaseUntil     DateTime?
+  leaseToken     String?
+  lastError      String?
+  startedAt      DateTime?
+  snapshotAt     DateTime?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  sentAt         DateTime? // conclusão compatível com o contrato legado
+
+  recipients BotBroadcastRecipient[]
 
   @@index([botUserId])
   @@index([createdAt])
+  @@index([status, leaseUntil])
   @@map("bot_broadcasts")
+}
+
+model BotBroadcastRecipient {
+  id          String                      @id @default(uuid())
+  broadcastId String
+  broadcast   BotBroadcast                @relation(fields: [broadcastId], references: [id], onDelete: Cascade)
+  userId      String
+  status      BotBroadcastRecipientStatus @default(PENDING)
+  leaseUntil  DateTime?
+  leaseToken  String?
+  messageId   String?
+  error       String?
+  sentAt      DateTime?
+  createdAt   DateTime                    @default(now())
+  updatedAt   DateTime                    @updatedAt
+
+  @@unique([broadcastId, userId])
+  @@index([broadcastId, status])
+  @@index([status, leaseUntil])
+  @@map("bot_broadcast_recipients")
 }
 
 // ─────────────────────── Campanhas de Notificação (push do painel) ───────────────────────
 
 model NotificationBroadcast {
-  id            String   @id @default(uuid())
-  title         String
-  body          String
-  audience      String   // all | premium | free | online | user
-  imageUrl      String?  // imagem opcional (upload ou URL externa)
-  actionType    String?  // null | internal | external
-  actionValue   String?  // rota interna (ex.: "chat") OU URL externa
-  targetedCount Int      @default(0) // quantos usuários foram selecionados
-  sentCount     Int      @default(0) // quantos registros criados (enviados)
-  deliveredCount Int     @default(0) // quantos tinham push (device token)
-  clickedCount   Int     @default(0) // quantos tocaram na notificação
+  id             String   @id @default(uuid())
+  title          String
+  body           String
+  audience       String // all | premium | free | online | user
+  imageUrl       String? // imagem opcional (upload ou URL externa)
+  actionType     String? // null | internal | external
+  actionValue    String? // rota interna (ex.: "chat") OU URL externa
+  targetedCount  Int      @default(0) // quantos usuários foram selecionados
+  sentCount      Int      @default(0) // quantos registros criados (enviados)
+  deliveredCount Int      @default(0) // quantos tinham push (device token)
+  clickedCount   Int      @default(0) // quantos tocaram na notificação
   createdAt      DateTime @default(now())
 
   @@index([createdAt])

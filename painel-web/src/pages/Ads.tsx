@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   IconSpeakerphone, IconDeviceFloppy, IconWindowMaximize, IconLayoutNavbar,
   IconRectangle, IconGift, IconArticle, IconAppWindow, IconAdjustments,
@@ -32,6 +33,8 @@ interface AdSettings {
   interstitialOnSwipe: boolean;
   maxAdsPerSession: number;
   maxAdsPerDay: number;
+  /** Vem do servidor (configurado em Recompensas); bloqueia a troca do bloco Premiado. */
+  rewardsRequireSsv?: boolean;
 }
 
 const EMPTY: AdSettings = {
@@ -50,7 +53,7 @@ const FORMATS: { key: keyof AdSettings; idKey: keyof AdSettings; label: string; 
   { key: "appOpenEnabled", idKey: "androidAppOpenId", label: "App Open (abertura)", icon: IconAppWindow, desc: "Tela cheia ao abrir/retomar o app" },
   { key: "bannerEnabled", idKey: "androidBannerId", label: "Banner", icon: IconLayoutNavbar, desc: "Faixa fixa no topo ou rodapé" },
   { key: "interstitialEnabled", idKey: "androidInterstitialId", label: "Intersticial", icon: IconWindowMaximize, desc: "Tela cheia entre ações" },
-  { key: "rewardedEnabled", idKey: "androidRewardedId", label: "Premiado (rewarded)", icon: IconGift, desc: "Usuário assiste e ganha recompensa" },
+  { key: "rewardedEnabled", idKey: "androidRewardedId", label: "Premiado (rewarded)", icon: IconGift, desc: "Usado nas Recompensas: o usuário assiste e ganha Super Likes, Boosts ou créditos" },
   { key: "rewardedInterstitialEnabled", idKey: "androidRewardedInterstitialId", label: "Intersticial premiado", icon: IconRectangle, desc: "Intersticial com recompensa opcional" },
   { key: "nativeEnabled", idKey: "androidNativeId", label: "Nativo (native)", icon: IconArticle, desc: "Anúncio integrado ao layout" },
 ];
@@ -105,8 +108,30 @@ export default function Ads() {
         testDeviceIds: a.testDeviceIds || null,
       });
       setToast({ type: "success", text: "Configuração de anúncios salva" });
-    } catch (e: any) { setToast({ type: "error", text: e.message }); }
+      // Recarrega só o que o servidor define: trocar o ID do Premiado zera a verificação do Google.
+      void refreshServerFlags();
+    } catch (e: any) {
+      setToast({ type: "error", text: e.message });
+      // Um 409 pode ser a trava do bloco Premiado (exigência ligada em outra aba): atualiza o estado do campo.
+      if (e?.status === 409) void refreshServerFlags();
+    }
     finally { setSaving(false); }
+  }
+
+  /** Atualiza só o que vem do servidor, preservando as edições ainda não salvas. */
+  async function refreshServerFlags() {
+    try {
+      const r = await get("/admin/ads");
+      const locked = Boolean(r.ads?.rewardsRequireSsv);
+      setA((s) => ({
+        ...s,
+        rewardsRequireSsv: locked,
+        // Travado: o campo volta ao ID salvo, senão mostraria bloqueado um valor que o servidor recusou.
+        ...(locked ? { androidRewardedId: r.ads?.androidRewardedId ?? "" } : {}),
+      }));
+    } catch {
+      // Sem a atualização, o servidor continua sendo quem valida.
+    }
   }
 
   return (
@@ -161,6 +186,9 @@ export default function Ads() {
                 <tbody>
                   {FORMATS.map((f) => {
                     const Icon = f.icon;
+                    // Com a confirmação do Google exigida, o servidor recusa trocar o ID do Premiado.
+                    const locked = f.idKey === "androidRewardedId" && Boolean(a.rewardsRequireSsv);
+                    const lockedId = `ad-id-locked-${f.idKey as string}`;
                     return (
                       <tr key={f.key as string}>
                         <td>
@@ -178,13 +206,32 @@ export default function Ads() {
                           </label>
                         </td>
                         <td>
-                          <input className="form-control" value={(a[f.idKey] as string) || ""} onChange={(e) => set(f.idKey, e.target.value as any)} placeholder="ca-app-pub-XXXXXXXX/XXXXXXXX" />
+                          <input
+                            className="form-control"
+                            aria-label={`Ad Unit ID: ${f.label}`}
+                            value={(a[f.idKey] as string) || ""}
+                            readOnly={locked}
+                            aria-describedby={locked ? lockedId : undefined}
+                            onChange={(e) => set(f.idKey, e.target.value as any)}
+                            placeholder={f.idKey === "androidRewardedId" ? "/REDE/bloco (Google Ad Manager)" : "ca-app-pub-XXXXXXXX/XXXXXXXX"}
+                          />
+                          {locked && (
+                            <div id={lockedId} className="text-secondary mt-1" style={{ fontSize: 12 }}>
+                              Bloqueado enquanto a confirmação do Google estiver exigida. Para trocar o ID, desligue a exigência em{" "}
+                              <Link to="/recompensas">Recompensas</Link>.
+                            </div>
+                          )}
                         </td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
+            </div>
+            <div className="card-footer text-secondary" style={{ fontSize: 13 }}>
+              O que cada anúncio premiado concede (Super Likes, Boosts, créditos), os limites por dia e a verificação do
+              Google ficam em <Link to="/recompensas">Recompensas</Link>. Trocar o ID do bloco Premiado zera essa
+              verificação (último callback e ad_unit esperado), que precisa ser refeita com o bloco novo.
             </div>
           </div>
 

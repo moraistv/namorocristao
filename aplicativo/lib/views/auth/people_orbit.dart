@@ -36,7 +36,8 @@ class PeopleOrbit extends StatelessWidget {
 
     // Órbita tracejada.
     children.add(Positioned.fill(
-      child: CustomPaint(painter: _DashedCirclePainter(_gold.withOpacity(0.35))),
+      child:
+          CustomPaint(painter: _DashedCirclePainter(_gold.withOpacity(0.35))),
     ));
 
     // Círculos concêntricos centrais (efeito radar).
@@ -46,8 +47,8 @@ class PeopleOrbit extends StatelessWidget {
     children.add(_circle(size * 0.24, Colors.white));
 
     // Avatar central.
-    children.add(_avatar(
-        _pos(0, 0), size * 0.20, "https://randomuser.me/api/portraits/women/79.jpg",
+    children.add(_avatar(_pos(0, 0), size * 0.20,
+        "https://randomuser.me/api/portraits/women/79.jpg",
         ring: true));
 
     // Avatares ao redor.
@@ -62,7 +63,8 @@ class PeopleOrbit extends StatelessWidget {
     children.add(Positioned(
       left: pinPos.dx - 14,
       top: pinPos.dy - 14,
-      child: _decoCircle(28, const Icon(Icons.location_on, color: _gold, size: 18)),
+      child: _decoCircle(
+          28, const Icon(Icons.location_on, color: _gold, size: 18)),
     ));
 
     // Balão de conversa embaixo-esquerda.
@@ -71,15 +73,17 @@ class PeopleOrbit extends StatelessWidget {
       left: chatPos.dx - 18,
       top: chatPos.dy - 18,
       child: _decoCircle(
-          36,
-          const Icon(Icons.more_horiz, color: _navy, size: 20),
+          36, const Icon(Icons.more_horiz, color: _navy, size: 20),
           color: _gold.withOpacity(0.85)),
     ));
 
     return SizedBox(
       width: size,
       height: size,
-      child: Stack(clipBehavior: Clip.none, alignment: Alignment.center, children: children),
+      child: Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.center,
+          children: children),
     );
   }
 
@@ -113,8 +117,7 @@ class PeopleOrbit extends StatelessWidget {
           child: CachedNetworkImage(
             imageUrl: url,
             fit: BoxFit.cover,
-            placeholder: (_, __) =>
-                Container(color: _gold.withOpacity(0.15)),
+            placeholder: (_, __) => Container(color: _gold.withOpacity(0.15)),
             errorWidget: (_, __, ___) => Container(
                 color: _gold.withOpacity(0.15),
                 child: const Icon(Icons.person, color: Colors.white)),

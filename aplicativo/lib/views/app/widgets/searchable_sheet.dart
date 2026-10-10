@@ -50,7 +50,8 @@ class _SearchableSheetState<T> extends State<_SearchableSheet<T>> {
         .where((e) => widget.label(e).toLowerCase().contains(_q.toLowerCase()))
         .toList();
     return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: SizedBox(
         height: MediaQuery.of(context).size.height * 0.75,
         child: Column(

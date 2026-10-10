@@ -13,7 +13,12 @@ class RealtimeBus {
   static final ValueNotifier<int> account = ValueNotifier<int>(0);
   static void accountChanged() => account.value++;
 
-  /// Incrementa quando a LOJA muda (planos, pacotes, presentes, valor do crédito).
+  /// Incrementa quando a preferência local de notificações muda. O shell usa
+  /// este evento para instalar ou cancelar listeners FCM sem reiniciar o app.
+  static final ValueNotifier<int> notifications = ValueNotifier<int>(0);
+  static void notificationsChanged() => notifications.value++;
+
+  /// Incrementa quando o catálogo muda no painel (recompensas por anúncio e presentes).
   static final ValueNotifier<int> store = ValueNotifier<int>(0);
   static void storeChanged() => store.value++;
 }

@@ -199,10 +199,7 @@ class LoginPage extends ConsumerWidget {
                       ),
                       TextSpan(
                         text: "Criar conta",
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleSmall!
-                            .copyWith(
+                        style: Theme.of(context).textTheme.titleSmall!.copyWith(
                               color: AppConstants.primaryColor,
                               fontWeight: FontWeight.bold,
                             ),

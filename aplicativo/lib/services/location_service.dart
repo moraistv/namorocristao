@@ -1,17 +1,21 @@
 import 'package:geolocator/geolocator.dart';
 import 'package:mioamoreapp/services/app_api.dart';
 
-/// Pede permissão de localização, obtém o GPS e atualiza no servidor
-/// para refinar a distância entre os usuários.
+class LocationCoordinates {
+  final double latitude;
+  final double longitude;
+
+  const LocationCoordinates(this.latitude, this.longitude);
+}
+
+/// Pede permissão de localização e sincroniza coordenadas reais com a API.
 class LocationService {
   LocationService._();
 
-  /// Tenta atualizar a localização. Retorna true se conseguiu.
-  /// [ask] = true pede a permissão ao usuário se ainda não tiver.
-  static Future<bool> refresh({bool ask = true}) async {
+  static Future<LocationCoordinates?> coordinates({bool ask = true}) async {
     try {
       final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) return false;
+      if (!serviceEnabled) return null;
 
       var permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied && ask) {
@@ -19,14 +23,33 @@ class LocationService {
       }
       if (permission == LocationPermission.denied ||
           permission == LocationPermission.deniedForever) {
-        return false;
+        return null;
       }
 
-      final pos = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.medium,
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.medium,
+        ),
       ).timeout(const Duration(seconds: 12));
+      return LocationCoordinates(position.latitude, position.longitude);
+    } catch (_) {
+      return null;
+    }
+  }
 
-      await AppApi.updateLocation(pos.latitude, pos.longitude);
+  /// Tenta atualizar a localização. Retorna true se conseguiu.
+  static Future<bool> refresh({
+    bool ask = true,
+    String? addressText,
+  }) async {
+    final current = await coordinates(ask: ask);
+    if (current == null) return false;
+    try {
+      await AppApi.updateLocation(
+        current.latitude,
+        current.longitude,
+        addressText: addressText,
+      );
       return true;
     } catch (_) {
       return false;
@@ -35,7 +58,8 @@ class LocationService {
 
   /// Só checa se já temos permissão (sem perguntar).
   static Future<bool> hasPermission() async {
-    final p = await Geolocator.checkPermission();
-    return p == LocationPermission.always || p == LocationPermission.whileInUse;
+    final permission = await Geolocator.checkPermission();
+    return permission == LocationPermission.always ||
+        permission == LocationPermission.whileInUse;
   }
 }

@@ -40,7 +40,7 @@ const INTERNAL_ROUTES = [
   { value: "likes", label: "Curtidas" },
   { value: "chat", label: "Conversas" },
   { value: "profile", label: "Meu Perfil" },
-  { value: "plans", label: "Planos / VIP" },
+  { value: "rewards", label: "Recompensas (anúncios)" },
 ];
 
 const QUICK_EMOJIS = ["😊", "💛", "😍", "🙏", "✨", "💕", "🔥", "🎉", "❤️", "🥰", "😇", "💖"];

@@ -126,7 +126,7 @@ class SubscriptionBottomSheet extends ConsumerWidget {
           ).toList();
         },
         error: (error, stackTrace) {
-          print(error);
+          debugPrint(error.toString());
           return [
             CupertinoActionSheetAction(
               onPressed: () {},

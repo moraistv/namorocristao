@@ -1,6 +1,7 @@
 import 'dart:math';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:mioamoreapp/services/public_url.dart';
 import 'package:mioamoreapp/views/app/app_theme.dart';
 import 'package:mioamoreapp/views/app/chat_page.dart';
 
@@ -12,6 +13,7 @@ Future<void> showMatchCelebration(
   String? otherPhoto,
   String? otherUserId,
   String? myPhoto,
+  bool otherIsVirtual = false,
 }) {
   return showGeneralDialog(
     context: context,
@@ -24,6 +26,7 @@ Future<void> showMatchCelebration(
       otherPhoto: otherPhoto,
       otherUserId: otherUserId,
       myPhoto: myPhoto,
+      otherIsVirtual: otherIsVirtual,
     ),
     transitionBuilder: (_, anim, __, child) => FadeTransition(
       opacity: anim,
@@ -38,12 +41,14 @@ class _MatchCelebration extends StatefulWidget {
   final String? otherPhoto;
   final String? otherUserId;
   final String? myPhoto;
+  final bool otherIsVirtual;
   const _MatchCelebration({
     required this.matchId,
     required this.otherName,
     this.otherPhoto,
     this.otherUserId,
     this.myPhoto,
+    this.otherIsVirtual = false,
   });
 
   @override
@@ -52,9 +57,9 @@ class _MatchCelebration extends StatefulWidget {
 
 class _MatchCelebrationState extends State<_MatchCelebration>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _c =
-      AnimationController(vsync: this, duration: const Duration(milliseconds: 900))
-        ..forward();
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 900))
+    ..forward();
 
   @override
   void dispose() {
@@ -86,7 +91,8 @@ class _MatchCelebrationState extends State<_MatchCelebration>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     ScaleTransition(
-                      scale: CurvedAnimation(parent: _c, curve: Curves.elasticOut),
+                      scale:
+                          CurvedAnimation(parent: _c, curve: Curves.elasticOut),
                       child: const Text(
                         "É um Match!",
                         style: TextStyle(
@@ -102,6 +108,27 @@ class _MatchCelebrationState extends State<_MatchCelebration>
                       style: const TextStyle(
                           fontSize: 16, color: Color(0xFF7A849C)),
                     ),
+                    if (widget.otherIsVirtual) ...[
+                      const SizedBox(height: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.gold.withOpacity(0.18),
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: const Text(
+                          "Perfil virtual • IA",
+                          style: TextStyle(
+                            color: AppTheme.navy,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 32),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
@@ -141,6 +168,7 @@ class _MatchCelebrationState extends State<_MatchCelebration>
                                 otherName: widget.otherName,
                                 otherPhoto: widget.otherPhoto,
                                 otherUserId: widget.otherUserId,
+                                otherIsVirtual: widget.otherIsVirtual,
                               ),
                             ),
                           );
@@ -152,15 +180,16 @@ class _MatchCelebrationState extends State<_MatchCelebration>
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(30))),
                         child: const Text("Conversar",
-                            style:
-                                TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+                            style: TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 17)),
                       ),
                     ),
                     const SizedBox(height: 10),
                     TextButton(
                       onPressed: () => Navigator.pop(context),
                       child: const Text("Pular",
-                          style: TextStyle(color: Color(0xFF7A849C), fontSize: 16)),
+                          style: TextStyle(
+                              color: Color(0xFF7A849C), fontSize: 16)),
                     ),
                   ],
                 ),
@@ -182,7 +211,10 @@ class _MatchCelebrationState extends State<_MatchCelebration>
         ),
         clipBehavior: Clip.antiAlias,
         child: url != null
-            ? CachedNetworkImage(imageUrl: url, fit: BoxFit.cover)
+            ? CachedNetworkImage(
+                imageUrl: PublicUrl.media(url),
+                fit: BoxFit.cover,
+              )
             : const Icon(Icons.person, color: Colors.white, size: 40),
       );
 

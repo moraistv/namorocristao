@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { asyncHandler } from "../../lib/errors";
-import { requireAdmin } from "../../middlewares/auth";
+import { requireAdmin, requireSuperAdmin } from "../../middlewares/auth";
 import * as c from "./admin.controller";
 
 // Montado em /api/admin (rotas de gestão; auth do admin fica em /api/admin/auth)
@@ -18,9 +18,21 @@ adminRouter.post("/users/:userId/ban", asyncHandler(c.banUser));
 adminRouter.delete("/users/:userId/ban", asyncHandler(c.unbanUser));
 adminRouter.post("/users/:userId/suspend", asyncHandler(c.suspendUser));
 adminRouter.delete("/users/:userId/suspend", asyncHandler(c.unsuspendUser));
-adminRouter.post("/users/:userId/premium", asyncHandler(c.grantPremium));
-adminRouter.delete("/users/:userId/premium", asyncHandler(c.revokePremium));
-adminRouter.post("/users/:userId/credits", asyncHandler(c.addCredits));
+adminRouter.post(
+  "/users/:userId/premium",
+  requireSuperAdmin,
+  asyncHandler(c.grantPremium)
+);
+adminRouter.delete(
+  "/users/:userId/premium",
+  requireSuperAdmin,
+  asyncHandler(c.revokePremium)
+);
+adminRouter.post(
+  "/users/:userId/credits",
+  requireSuperAdmin,
+  asyncHandler(c.addCredits)
+);
 adminRouter.post("/users/:userId/verify", asyncHandler(c.setVerified));
 
 adminRouter.get("/reports", asyncHandler(c.listReports));
@@ -36,11 +48,19 @@ adminRouter.post(
   asyncHandler(c.processDeleteRequest)
 );
 
-adminRouter.get("/settings", asyncHandler(c.getSettings));
-adminRouter.put("/settings", asyncHandler(c.updateSettings));
+adminRouter.get("/settings", requireSuperAdmin, asyncHandler(c.getSettings));
+adminRouter.put("/settings", requireSuperAdmin, asyncHandler(c.updateSettings));
 
-adminRouter.post("/notifications/broadcast", asyncHandler(c.broadcastNotification));
-adminRouter.get("/notifications/recent", asyncHandler(c.recentNotifications));
+adminRouter.post(
+  "/notifications/broadcast",
+  requireSuperAdmin,
+  asyncHandler(c.broadcastNotification)
+);
+adminRouter.get(
+  "/notifications/recent",
+  requireSuperAdmin,
+  asyncHandler(c.recentNotifications)
+);
 
 adminRouter.get("/admins", asyncHandler(c.listAdmins));
 adminRouter.post("/admins", asyncHandler(c.createAdmin));

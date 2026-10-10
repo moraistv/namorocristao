@@ -4,6 +4,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:mioamoreapp/services/app_api.dart';
 import 'package:mioamoreapp/services/ads_service.dart';
 import 'package:mioamoreapp/services/interstitial_manager.dart';
+import 'package:mioamoreapp/services/public_url.dart';
 import 'package:mioamoreapp/services/token_storage.dart';
 import 'package:mioamoreapp/views/app/app_theme.dart';
 import 'package:mioamoreapp/views/app/chat_page.dart';
@@ -166,50 +167,57 @@ class _MatchesPageState extends State<MatchesPage> {
                 padding: const EdgeInsets.fromLTRB(20, 4, 20, 24),
                 children: [
                   if (_loading)
-              const Padding(
-                  padding: EdgeInsets.all(40),
-                  child: Center(child: CircularProgressIndicator())),
-            if (_error != null) Center(child: Text(_error!)),
-            if (!_loading) ...[
-              if (newMatches.isNotEmpty) ...[
-                const SizedBox(height: 18),
-                const Text("Matches recentes",
-                    style: TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.navy)),
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: 92,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    children: newMatches.map(_newMatchAvatar).toList(),
-                  ),
-                ),
-                const SizedBox(height: 20),
-              ],
-              if (newMatches.isEmpty) const SizedBox(height: 14),
-              const Text("Conversas",
-                  style: TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.navy)),
-              const SizedBox(height: 6),
-              if (convos.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.only(top: 30),
-                  child: Center(
-                      child: Text("Sem conversas ainda. Diga olá nos novos matches! 👋",
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Color(0xFF9AA1B2)))),
-                ),
-              for (int i = 0; i < convos.length; i++) ...[
-                _convoTile(convos[i]),
-                if (i < convos.length - 1)
-                  const Padding(
-                    padding: EdgeInsets.only(left: 70),
-                    child: Divider(
-                        height: 1, thickness: 1, color: Color(0xFFD9DEE7)),
-                  ),
-              ],
-            ],
-          ],
+                    const Padding(
+                        padding: EdgeInsets.all(40),
+                        child: Center(child: CircularProgressIndicator())),
+                  if (_error != null) Center(child: Text(_error!)),
+                  if (!_loading) ...[
+                    if (newMatches.isNotEmpty) ...[
+                      const SizedBox(height: 18),
+                      const Text("Matches recentes",
+                          style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: AppTheme.navy)),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        height: 108,
+                        child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          children: newMatches.map(_newMatchAvatar).toList(),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+                    if (newMatches.isEmpty) const SizedBox(height: 14),
+                    const Text("Conversas",
+                        style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: AppTheme.navy)),
+                    const SizedBox(height: 6),
+                    if (convos.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.only(top: 30),
+                        child: Center(
+                            child: Text(
+                                "Sem conversas ainda. Diga olá nos novos matches! 👋",
+                                textAlign: TextAlign.center,
+                                style: TextStyle(color: Color(0xFF9AA1B2)))),
+                      ),
+                    for (int i = 0; i < convos.length; i++) ...[
+                      _convoTile(convos[i]),
+                      if (i < convos.length - 1)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 70),
+                          child: Divider(
+                              height: 1,
+                              thickness: 1,
+                              color: Color(0xFFD9DEE7)),
+                        ),
+                    ],
+                  ],
+                ],
               ),
             ),
           ),
@@ -221,6 +229,7 @@ class _MatchesPageState extends State<MatchesPage> {
   Widget _newMatchAvatar(dynamic m) {
     final other = m["otherUser"] ?? {};
     final name = (other["name"] ?? "").toString().split(" ").first;
+    final isVirtual = other["isVirtual"] == true || other["isBot"] == true;
     return GestureDetector(
       onTap: () => _openChat(m),
       child: Padding(
@@ -232,7 +241,9 @@ class _MatchesPageState extends State<MatchesPage> {
                 radius: 31,
                 backgroundColor: const Color(0xFFE8EAF0),
                 backgroundImage: other["profilePicture"] != null
-                    ? CachedNetworkImageProvider(other["profilePicture"])
+                    ? CachedNetworkImageProvider(
+                        PublicUrl.media(other["profilePicture"].toString()),
+                      )
                     : null,
                 child: other["profilePicture"] == null
                     ? const Icon(Icons.person, color: Colors.white)
@@ -254,13 +265,29 @@ class _MatchesPageState extends State<MatchesPage> {
             ]),
             const SizedBox(height: 5),
             SizedBox(
-              width: 64,
+              width: 80,
               child: Text(name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                  style: const TextStyle(
+                      fontSize: 12, fontWeight: FontWeight.w600)),
             ),
+            if (isVirtual)
+              const SizedBox(
+                width: 94,
+                child: Text(
+                  "Perfil virtual • IA",
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Color(0xFFD4AF37),
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -272,6 +299,7 @@ class _MatchesPageState extends State<MatchesPage> {
     final last = m["lastMessage"];
     final unread = (m["unreadCount"] ?? 0) as int;
     final online = other["isOnline"] == true;
+    final isVirtual = other["isVirtual"] == true || other["isBot"] == true;
     final myId = TokenStorage.userId;
     final lastMine = last != null && last["senderId"]?.toString() == myId;
     final lastRead = last != null && last["readAt"] != null;
@@ -289,7 +317,9 @@ class _MatchesPageState extends State<MatchesPage> {
                 radius: 28,
                 backgroundColor: const Color(0xFFE8EAF0),
                 backgroundImage: other["profilePicture"] != null
-                    ? CachedNetworkImageProvider(other["profilePicture"])
+                    ? CachedNetworkImageProvider(
+                        PublicUrl.media(other["profilePicture"].toString()),
+                      )
                     : null,
                 child: other["profilePicture"] == null
                     ? const Icon(Icons.person, color: Colors.white)
@@ -319,6 +349,18 @@ class _MatchesPageState extends State<MatchesPage> {
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
                           color: AppTheme.navy)),
+                  if (isVirtual)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 2),
+                      child: Text(
+                        "Perfil virtual • IA",
+                        style: TextStyle(
+                          color: Color(0xFFD4AF37),
+                          fontWeight: FontWeight.bold,
+                          fontSize: 10.5,
+                        ),
+                      ),
+                    ),
                   const SizedBox(height: 3),
                   isTyping
                       ? const Text("digitando...",
@@ -335,14 +377,16 @@ class _MatchesPageState extends State<MatchesPage> {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(_timeAgo(last?["createdAt"]?.toString()),
-                    style: const TextStyle(color: Color(0xFF9AA1B2), fontSize: 12)),
+                    style: const TextStyle(
+                        color: Color(0xFF9AA1B2), fontSize: 12)),
                 const SizedBox(height: 6),
                 if (!lastMine && unread > 0)
                   Container(
                     padding: const EdgeInsets.all(6),
                     decoration: const BoxDecoration(
                         color: Color(0xFFD4AF37), shape: BoxShape.circle),
-                    constraints: const BoxConstraints(minWidth: 22, minHeight: 22),
+                    constraints:
+                        const BoxConstraints(minWidth: 22, minHeight: 22),
                     child: Text("$unread",
                         textAlign: TextAlign.center,
                         style: const TextStyle(
@@ -377,6 +421,7 @@ class _MatchesPageState extends State<MatchesPage> {
           otherName: other["name"]?.toString() ?? "Usuário",
           otherPhoto: other["profilePicture"]?.toString(),
           otherUserId: other["id"]?.toString(),
+          otherIsVirtual: other["isVirtual"] == true || other["isBot"] == true,
         ),
       ),
     );

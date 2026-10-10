@@ -37,11 +37,19 @@ export async function verifyGoogleIdToken(
   if (!payload || !payload.sub || !payload.email) {
     throw new AppError("Token do Google sem dados suficientes", 401);
   }
+  if (payload.email_verified !== true) {
+    throw new AppError(
+      "O e-mail da conta Google não está verificado",
+      401,
+      undefined,
+      "GOOGLE_EMAIL_NOT_VERIFIED"
+    );
+  }
 
   return {
     googleId: payload.sub,
     email: payload.email.toLowerCase(),
-    emailVerified: payload.email_verified ?? false,
+    emailVerified: true,
     name: payload.name,
     picture: payload.picture,
   };

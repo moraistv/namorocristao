@@ -12,6 +12,11 @@ import { photoAccessRouter } from "../modules/photoAccess/photoAccess.routes";
 import { devRouter } from "../modules/dev/dev.routes";
 import { monetizationAdminRouter, configPublicRouter } from "../modules/monetization/monetization.routes";
 import { chatbotAdminRouter } from "../modules/chatbot/chatbot.routes";
+import {
+  adsCallbackRouter,
+  rewardsAdminRouter,
+  rewardsUserRouter,
+} from "../modules/rewards/rewards.routes";
 
 export const router = Router();
 
@@ -34,14 +39,19 @@ if (process.env.NODE_ENV !== "production") {
 
 // ── Painel admin (gestão) ──
 router.use("/admin", adminRouter);
-router.use("/admin", monetizationAdminRouter); // produtos, presentes, créditos, anúncios
+router.use("/admin", monetizationAdminRouter); // presentes, anúncios, versos
+router.use("/admin", rewardsAdminRouter); // recompensas por anúncio premiado
 router.use("/admin", chatbotAdminRouter); // chatbot (regras/analytics/settings) + bots
 
 // ── Config pública (app lê em tempo real) ──
 router.use("/config", configPublicRouter);
 
+// ── Callback do Google para anúncios premiados (SSV) — público, assinado ──
+router.use("/ads", adsCallbackRouter);
+
 // ── Usuário atual ──
 router.use("/me/verification", verificationRouter);
+router.use("/me/rewards", rewardsUserRouter);
 router.use("/me", profileRouter);
 
 // ── App (autenticado) — montados em "/" ──

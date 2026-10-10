@@ -9,25 +9,29 @@ import 'package:image_picker/image_picker.dart';
 import 'package:social_media_recorder/audio_encoder_type.dart';
 import 'package:social_media_recorder/screen/social_media_recorder.dart';
 import 'package:voice_message_package/voice_message_package.dart';
+import 'package:mioamoreapp/services/ads_service.dart';
 import 'package:mioamoreapp/services/app_api.dart';
-import 'package:mioamoreapp/config/api_config.dart';
+import 'package:mioamoreapp/services/public_url.dart';
 import 'package:mioamoreapp/services/chat_socket.dart';
 import 'package:mioamoreapp/services/token_storage.dart';
 import 'package:mioamoreapp/views/app/app_theme.dart';
 import 'package:mioamoreapp/views/app/ads/app_banner.dart';
 import 'package:mioamoreapp/views/app/profile_detail_view.dart';
+import 'package:mioamoreapp/views/app/rewards_page.dart';
 
 class ChatPage extends StatefulWidget {
   final String matchId;
   final String otherName;
   final String? otherPhoto;
   final String? otherUserId;
+  final bool otherIsVirtual;
   const ChatPage({
     super.key,
     required this.matchId,
     required this.otherName,
     this.otherPhoto,
     this.otherUserId,
+    this.otherIsVirtual = false,
   });
 
   @override
@@ -46,10 +50,16 @@ class _ChatPageState extends State<ChatPage> {
   bool _hasText = false;
   bool _recording = false;
   bool _otherOnline = false;
+  late bool _otherIsVirtual;
+  bool _polling = false;
+  bool _markReadInFlight = false;
+  bool _markReadPending = false;
   String? _otherLastActive;
   Timer? _presenceTimer;
+  Timer? _otherTypingTimer;
   bool _typingSent = false;
-  String? _accessStatus; // null/PENDING/APPROVED/DENIED (acesso às fotos do outro)
+  String?
+      _accessStatus; // null/PENDING/APPROVED/DENIED (acesso às fotos do outro)
   String get _myId => TokenStorage.userId ?? "";
 
   // Sugestões de "quebra-gelo" (rotacionam pra não ficar mesmice).
@@ -70,140 +80,186 @@ class _ChatPageState extends State<ChatPage> {
   int _sugOffset = 0;
   Timer? _sugTimer;
   Timer? _pollTimer;
-  Timer? _localTypingTimer;
-  bool _localTyping = false;
 
   @override
   void initState() {
     super.initState();
+    _otherIsVirtual = widget.otherIsVirtual;
     _allSuggestions.shuffle();
-    _init();
+    unawaited(_init());
     // Rotaciona as 3 sugestões exibidas a cada 6s.
     _sugTimer = Timer.periodic(const Duration(seconds: 6), (_) {
-      if (!mounted) return;
+      if (!mounted || !_showSuggestions) return;
       setState(() => _sugOffset = (_sugOffset + 3) % _allSuggestions.length);
     });
   }
 
   Future<void> _init() async {
+    List<Map<String, dynamic>> messages = [];
     try {
-      final hist = await AppApi.getHistory(widget.matchId);
-      _messages = hist.cast<Map<String, dynamic>>();
-    } catch (_) {}
-    setState(() => _loading = false);
+      final history = await AppApi.getHistory(widget.matchId);
+      messages = history
+          .whereType<Map>()
+          .map((message) => Map<String, dynamic>.from(message))
+          .toList();
+    } catch (error) {
+      debugPrint("Não foi possível carregar o histórico: $error");
+    }
+    if (!mounted) return;
+
+    setState(() {
+      _messages = messages;
+      _loading = false;
+    });
     _scrollToBottom();
-    // Marca como lido de forma confiável (REST) ao abrir — cobre mensagens
-    // acumuladas do bot/broadcast mesmo se o socket ainda não conectou.
-    AppApi.markRead(widget.matchId);
-    _refreshAccess();
-    _refreshPresence();
-    _presenceTimer =
-        Timer.periodic(const Duration(seconds: 30), (_) => _refreshPresence());
-    // Fallback confiável de tempo real: busca novas mensagens via REST a cada 2,5s
-    // (garante ver a resposta do bot/pessoa mesmo se o socket não conectar).
-    _pollTimer =
-        Timer.periodic(const Duration(milliseconds: 2500), (_) => _poll());
+    _scheduleMarkRead();
+    unawaited(_refreshAccess());
+    unawaited(_refreshPresence());
+    _presenceTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => _refreshPresence(),
+    );
+    _pollTimer = Timer.periodic(
+      const Duration(milliseconds: 2500),
+      (_) => _poll(),
+    );
 
     _socket.connect(
-      onMessage: (msg) {
-        if (msg["matchId"] == widget.matchId) {
-          _addMessage(msg);
-          if (msg["senderId"] != _myId) {
-            _clearLocalTyping();
-            _socket.markRead(widget.matchId);
-            AppApi.markRead(widget.matchId); // confiável (REST), inclusive p/ bot
-          }
+      onMessage: (message) {
+        if (!mounted || message["matchId"] != widget.matchId) return;
+        _addMessage(message);
+        if (message["senderId"] != _myId) {
+          _socket.markRead(widget.matchId);
+          _scheduleMarkRead();
         }
       },
       onRead: (matchId, by) {
-        if (matchId == widget.matchId && by != _myId) {
-          setState(() {
-            for (final msg in _messages) {
-              if (msg["senderId"] == _myId && msg["readAt"] == null) {
-                msg["readAt"] = DateTime.now().toIso8601String();
-              }
+        if (!mounted || matchId != widget.matchId || by == _myId) return;
+        setState(() {
+          for (final message in _messages) {
+            if (message["senderId"] == _myId && message["readAt"] == null) {
+              message["readAt"] = DateTime.now().toIso8601String();
+            }
+          }
+        });
+      },
+      onTyping: (matchId, userId, isTyping) {
+        if (!mounted || matchId != widget.matchId || userId == _myId) return;
+        _otherTypingTimer?.cancel();
+        setState(() => _otherTyping = isTyping);
+        if (isTyping) {
+          _otherTypingTimer = Timer(const Duration(seconds: 8), () {
+            if (mounted && _otherTyping) {
+              setState(() => _otherTyping = false);
             }
           });
         }
       },
-      onTyping: (matchId, userId, isTyping) {
-        if (matchId == widget.matchId && userId != _myId) {
-          setState(() => _otherTyping = isTyping);
-        }
-      },
     );
-    // Pequeno atraso pra garantir conexão antes do join.
-    Future.delayed(const Duration(milliseconds: 400), () {
-      _socket.joinMatch(widget.matchId);
-    });
+    _socket.joinMatch(widget.matchId);
+  }
+
+  void _scheduleMarkRead() {
+    if (_markReadInFlight) {
+      _markReadPending = true;
+      return;
+    }
+    _markReadInFlight = true;
+    unawaited(_performMarkRead());
+  }
+
+  Future<void> _performMarkRead() async {
+    try {
+      await AppApi.markRead(widget.matchId);
+    } catch (error) {
+      debugPrint("Não foi possível marcar a conversa como lida: $error");
+    } finally {
+      _markReadInFlight = false;
+      if (_markReadPending && mounted) {
+        _markReadPending = false;
+        _scheduleMarkRead();
+      }
+    }
   }
 
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) {
-        _scroll.animateTo(_scroll.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
-      }
+      if (!mounted || !_scroll.hasClients) return;
+      unawaited(
+        _scroll
+            .animateTo(
+          _scroll.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOut,
+        )
+            .catchError((Object error) {
+          debugPrint("Não foi possível rolar o chat: $error");
+        }),
+      );
     });
   }
 
-  void _send() async {
+  Future<void> _send() async {
     final text = _controller.text.trim();
     if (text.isEmpty) return;
     _controller.clear();
-    setState(() => _hasText = false);
+    if (mounted) setState(() => _hasText = false);
     _typingSent = false;
     _socket.setTyping(widget.matchId, false);
     try {
-      final msg = await AppApi.sendMessage(widget.matchId, text);
-      _addMessage(msg);
-      _startLocalTyping(); // mostra "digitando..." enquanto a resposta vem
-    } catch (_) {
-      EasyLoading.showError("Falha ao enviar");
+      final message = await AppApi.sendMessage(widget.matchId, text);
+      _addMessage(message);
+    } catch (error) {
+      if (mounted && _controller.text.isEmpty) {
+        _controller.text = text;
+        _controller.selection = TextSelection.collapsed(offset: text.length);
+        setState(() => _hasText = true);
+        _typingSent = true;
+        _socket.setTyping(widget.matchId, true);
+      }
+      EasyLoading.showError(
+        error is AppApiException ? error.message : "Falha ao enviar",
+      );
     }
   }
 
-  // Busca novas mensagens via REST (fallback de tempo real). Incremental: só
-  // pega o que chegou depois da última mensagem que já temos (payload mínimo).
+  // Busca incremental via REST quando o socket estiver indisponível.
   Future<void> _poll() async {
+    if (_polling) return;
+    _polling = true;
     try {
-      final String? after =
+      final after =
           _messages.isNotEmpty ? _messages.last["createdAt"]?.toString() : null;
-      final hist = await AppApi.getHistory(widget.matchId, after: after);
-      final list = hist.cast<Map<String, dynamic>>();
-      if (list.isEmpty) return;
-      bool added = false;
-      for (final m in list) {
-        final id = m["id"]?.toString();
-        if (id == null) continue;
-        if (_messages.any((x) => x["id"]?.toString() == id)) continue;
-        _messages.add(m);
-        added = true;
-        if (m["senderId"] != _myId) {
-          _clearLocalTyping();
-          AppApi.markRead(widget.matchId);
+      final history = await AppApi.getHistory(widget.matchId, after: after);
+      if (!mounted) return;
+
+      final additions = <Map<String, dynamic>>[];
+      var hasRemoteMessage = false;
+      for (final raw in history.whereType<Map>()) {
+        final message = Map<String, dynamic>.from(raw);
+        final id = message["id"]?.toString();
+        if (id == null ||
+            _messages.any((item) => item["id"]?.toString() == id) ||
+            additions.any((item) => item["id"]?.toString() == id)) {
+          continue;
         }
+        additions.add(message);
+        hasRemoteMessage =
+            hasRemoteMessage || message["senderId"]?.toString() != _myId;
       }
-      if (added && mounted) {
-        setState(() {});
-        _scrollToBottom();
+      if (additions.isEmpty) return;
+
+      setState(() => _messages.addAll(additions));
+      _scrollToBottom();
+      if (hasRemoteMessage) {
+        _socket.markRead(widget.matchId);
+        _scheduleMarkRead();
       }
-    } catch (_) {}
-  }
-
-  // "Digitando..." otimista após eu enviar (a resposta — ex.: do bot — vem logo).
-  void _startLocalTyping() {
-    _localTypingTimer?.cancel();
-    if (mounted) setState(() => _localTyping = true);
-    _scrollToBottom();
-    _localTypingTimer = Timer(const Duration(seconds: 8), () {
-      if (mounted) setState(() => _localTyping = false);
-    });
-  }
-
-  void _clearLocalTyping() {
-    _localTypingTimer?.cancel();
-    if (_localTyping && mounted) setState(() => _localTyping = false);
+    } catch (error) {
+      debugPrint("Falha no polling do chat: $error");
+    } finally {
+      _polling = false;
+    }
   }
 
   Future<void> _sendPhoto(ImageSource source) async {
@@ -236,8 +292,8 @@ class _ChatPageState extends State<ChatPage> {
       final url = await AppApi.uploadPhoto(base64Encode(bytes), ext: "m4a");
       final secs = _parseSeconds(time);
       // content = "url#segundos" para reconstruir a duração no player.
-      final msg = await AppApi.sendMessage(widget.matchId, "$url#$secs",
-          type: "AUDIO");
+      final msg =
+          await AppApi.sendMessage(widget.matchId, "$url#$secs", type: "AUDIO");
       _addMessage(msg);
       EasyLoading.dismiss();
     } catch (_) {
@@ -248,7 +304,8 @@ class _ChatPageState extends State<ChatPage> {
 
   int _parseSeconds(String time) {
     // Aceita "ss", "m:ss" ou "h:mm:ss".
-    final parts = time.trim().split(":").map((e) => int.tryParse(e) ?? 0).toList();
+    final parts =
+        time.trim().split(":").map((e) => int.tryParse(e) ?? 0).toList();
     if (parts.length == 1) return parts[0];
     if (parts.length == 2) return parts[0] * 60 + parts[1];
     if (parts.length == 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
@@ -274,10 +331,13 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   /// Adiciona a mensagem evitando duplicatas (socket + REST podem repetir).
-  void _addMessage(Map<String, dynamic> msg) {
-    final id = msg["id"]?.toString();
-    if (id != null && _messages.any((m) => m["id"]?.toString() == id)) return;
-    setState(() => _messages.add(msg));
+  void _addMessage(Map<String, dynamic> message) {
+    if (!mounted) return;
+    final id = message["id"]?.toString();
+    if (id != null && _messages.any((item) => item["id"]?.toString() == id)) {
+      return;
+    }
+    setState(() => _messages.add(message));
     _scrollToBottom();
   }
 
@@ -330,8 +390,7 @@ class _ChatPageState extends State<ChatPage> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Text("🪙 ",
-                            style: TextStyle(fontSize: 14)),
+                        const Text("🪙 ", style: TextStyle(fontSize: 14)),
                         Text("$credits créditos",
                             style: const TextStyle(
                                 fontWeight: FontWeight.bold,
@@ -368,7 +427,7 @@ class _ChatPageState extends State<ChatPage> {
                       final canAfford = credits >= cost;
                       return InkWell(
                         onTap: () => _confirmSendGift(g, () {
-                          // ao enviar, debita localmente e atualiza a folha
+                          if (!sheetCtx.mounted) return;
                           setSheet(() => credits -= cost);
                         }),
                         borderRadius: BorderRadius.circular(14),
@@ -412,6 +471,25 @@ class _ChatPageState extends State<ChatPage> {
                     },
                   ),
                 ),
+              if (AdsService.rewardedAvailable) ...[
+                const SizedBox(height: 8),
+                TextButton.icon(
+                  onPressed: () {
+                    Navigator.pop(sheetCtx);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => const RewardsPage(
+                          highlight:
+                              "Assista a um anúncio e ganhe créditos para enviar presentes.",
+                        ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.play_circle_fill_rounded, size: 18),
+                  label: const Text("Ganhar créditos"),
+                ),
+              ],
             ],
           ),
         ),
@@ -440,17 +518,8 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 
-  /// Resolve URLs de mídia: `/uploads/...` (relativo ou com host errado tipo
-  /// localhost) sempre apontam para o host real da API. URLs externas passam direto.
-  String? _mediaUrl(String? raw) {
-    if (raw == null || raw.isEmpty) return null;
-    final idx = raw.indexOf("/uploads/");
-    if (idx >= 0) {
-      final origin = ApiConfig.baseUrl.replaceAll("/api", "");
-      return origin + raw.substring(idx);
-    }
-    return raw;
-  }
+  /// Resolve mídia relativa e uploads com host antigo na origem pública da API.
+  String? _mediaUrl(String? raw) => PublicUrl.maybeMedia(raw);
 
   Future<void> _confirmSendGift(
       Map<String, dynamic> gift, VoidCallback onSent) async {
@@ -502,9 +571,15 @@ class _ChatPageState extends State<ChatPage> {
     try {
       final card = await AppApi.getUserCard(widget.otherUserId!);
       if (card != null && mounted) {
+        final hasVirtualFlag =
+            card.containsKey("isVirtual") || card.containsKey("isBot");
         setState(() {
           _otherOnline = card["isOnline"] == true;
           _otherLastActive = card["lastActiveAt"]?.toString();
+          if (hasVirtualFlag) {
+            _otherIsVirtual =
+                card["isVirtual"] == true || card["isBot"] == true;
+          }
         });
       }
     } catch (_) {}
@@ -516,8 +591,7 @@ class _ChatPageState extends State<ChatPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => Dialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
@@ -538,9 +612,12 @@ class _ChatPageState extends State<ChatPage> {
                 style: const TextStyle(color: Color(0xFF7A849C)),
               ),
               const SizedBox(height: 18),
-              _blockInfo(Icons.person_off, "Não poderá ver seu perfil nem te enviar mensagens."),
-              _blockInfo(Icons.notifications_off, "A pessoa não será avisada do bloqueio."),
-              _blockInfo(Icons.settings, "Você pode desbloquear quando quiser."),
+              _blockInfo(Icons.person_off,
+                  "Não poderá ver seu perfil nem te enviar mensagens."),
+              _blockInfo(Icons.notifications_off,
+                  "A pessoa não será avisada do bloqueio."),
+              _blockInfo(
+                  Icons.settings, "Você pode desbloquear quando quiser."),
               const SizedBox(height: 20),
               Row(children: [
                 Expanded(
@@ -729,7 +806,12 @@ class _ChatPageState extends State<ChatPage> {
           insetPadding: const EdgeInsets.all(12),
           child: PageView(
             children: photos
-                .map((p) => CachedNetworkImage(imageUrl: p, fit: BoxFit.contain))
+                .map(
+                  (photo) => CachedNetworkImage(
+                    imageUrl: PublicUrl.media(photo),
+                    fit: BoxFit.contain,
+                  ),
+                )
                 .toList(),
           ),
         ),
@@ -744,8 +826,9 @@ class _ChatPageState extends State<ChatPage> {
   void dispose() {
     _sugTimer?.cancel();
     _pollTimer?.cancel();
-    _localTypingTimer?.cancel();
+    _otherTypingTimer?.cancel();
     _presenceTimer?.cancel();
+    if (_typingSent) _socket.setTyping(widget.matchId, false);
     _socket.leaveMatch(widget.matchId);
     _socket.disconnect();
     _controller.dispose();
@@ -776,7 +859,9 @@ class _ChatPageState extends State<ChatPage> {
                 radius: 18,
                 backgroundColor: const Color(0xFFE8EAF0),
                 backgroundImage: widget.otherPhoto != null
-                    ? CachedNetworkImageProvider(widget.otherPhoto!)
+                    ? CachedNetworkImageProvider(
+                        PublicUrl.media(widget.otherPhoto!),
+                      )
                     : null,
                 child: widget.otherPhoto == null
                     ? const Icon(Icons.person, size: 18, color: Colors.white)
@@ -795,36 +880,81 @@ class _ChatPageState extends State<ChatPage> {
                     Text(widget.otherName,
                         style: const TextStyle(
                             fontSize: 16, fontWeight: FontWeight.bold)),
-                    Row(
-                      children: [
-                        if (!_otherTyping && _otherOnline) ...[
+                    if (_otherIsVirtual)
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
                           Container(
-                            width: 8,
-                            height: 8,
-                            decoration: const BoxDecoration(
-                                color: Color(0xFF2FB344),
-                                shape: BoxShape.circle),
+                            margin: const EdgeInsets.only(top: 2),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: AppTheme.gold.withOpacity(0.18),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.smart_toy_outlined,
+                                    color: AppTheme.navy, size: 12),
+                                SizedBox(width: 4),
+                                Text(
+                                  "Perfil virtual • IA",
+                                  style: TextStyle(
+                                    color: AppTheme.navy,
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                          const SizedBox(width: 5),
+                          if (_otherTyping)
+                            const Padding(
+                              padding: EdgeInsets.only(top: 2),
+                              child: Text(
+                                "IA preparando resposta...",
+                                style: TextStyle(
+                                  color: Color(0xFFD4AF37),
+                                  fontSize: 11,
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                            ),
                         ],
-                        Flexible(
-                          child: Text(
-                            _otherTyping
-                                ? "digitando..."
-                                : presenceText(_otherOnline, _otherLastActive),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: _otherTyping
-                                    ? AppTheme.gold
-                                    : (_otherOnline
-                                        ? const Color(0xFF2FB344)
-                                        : const Color(0xFF9AA1B2))),
+                      )
+                    else
+                      Row(
+                        children: [
+                          if (!_otherTyping && _otherOnline) ...[
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: const BoxDecoration(
+                                  color: Color(0xFF2FB344),
+                                  shape: BoxShape.circle),
+                            ),
+                            const SizedBox(width: 5),
+                          ],
+                          Flexible(
+                            child: Text(
+                              _otherTyping
+                                  ? "digitando..."
+                                  : presenceText(
+                                      _otherOnline, _otherLastActive),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: _otherTyping
+                                      ? AppTheme.gold
+                                      : (_otherOnline
+                                          ? const Color(0xFF2FB344)
+                                          : const Color(0xFF9AA1B2))),
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
+                        ],
+                      ),
                   ],
                 ),
               ),
@@ -874,14 +1004,15 @@ class _ChatPageState extends State<ChatPage> {
                 : ListView.builder(
                     controller: _scroll,
                     padding: const EdgeInsets.all(16),
-                    itemCount: _messages.length +
-                        ((_otherTyping || _localTyping) ? 1 : 0),
-                    itemBuilder: (_, i) {
-                      if ((_otherTyping || _localTyping) &&
-                          i == _messages.length) {
-                        return const TypingBubble();
+                    itemCount: _messages.length + (_otherTyping ? 1 : 0),
+                    itemBuilder: (_, index) {
+                      if (_otherTyping && index == _messages.length) {
+                        return TypingBubble(
+                          label:
+                              _otherIsVirtual ? "IA preparando resposta" : null,
+                        );
                       }
-                      return _bubble(_messages[i]);
+                      return _bubble(_messages[index]);
                     },
                   ),
           ),
@@ -895,9 +1026,7 @@ class _ChatPageState extends State<ChatPage> {
 
   // Mostra quebra-gelos rotativos enquanto a conversa ainda não tem mensagens reais.
   bool get _showSuggestions =>
-      !_recording &&
-      !_hasText &&
-      !_messages.any((m) => m["type"] != "SYSTEM");
+      !_recording && !_hasText && !_messages.any((m) => m["type"] != "SYSTEM");
 
   Widget _suggestionsBar() {
     if (!_showSuggestions) return const SizedBox.shrink();
@@ -1017,7 +1146,8 @@ class _ChatPageState extends State<ChatPage> {
                         offset: const Offset(0, 3)),
                   ],
                 ),
-                child: const Icon(Icons.favorite, color: Colors.white, size: 26),
+                child:
+                    const Icon(Icons.favorite, color: Colors.white, size: 26),
               ),
               const SizedBox(height: 12),
               const Text(
@@ -1035,9 +1165,7 @@ class _ChatPageState extends State<ChatPage> {
                     : content,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
-                    color: Color(0xFF6A7286),
-                    fontSize: 13.5,
-                    height: 1.3),
+                    color: Color(0xFF6A7286), fontSize: 13.5, height: 1.3),
               ),
             ],
           ),
@@ -1052,8 +1180,8 @@ class _ChatPageState extends State<ChatPage> {
         padding: isImage
             ? const EdgeInsets.all(4)
             : const EdgeInsets.fromLTRB(14, 10, 14, 6),
-        constraints: BoxConstraints(
-            maxWidth: MediaQuery.of(context).size.width * 0.72),
+        constraints:
+            BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.72),
         decoration: BoxDecoration(
           gradient: mine
               ? const LinearGradient(
@@ -1082,7 +1210,7 @@ class _ChatPageState extends State<ChatPage> {
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(14),
                   child: CachedNetworkImage(
-                    imageUrl: m["content"].toString(),
+                    imageUrl: PublicUrl.media(m["content"].toString()),
                     width: 220,
                     height: 280,
                     fit: BoxFit.cover,
@@ -1109,7 +1237,8 @@ class _ChatPageState extends State<ChatPage> {
                     fontSize: 15),
               ),
             Padding(
-              padding: EdgeInsets.only(top: isImage ? 4 : 3, left: isImage ? 6 : 0),
+              padding:
+                  EdgeInsets.only(top: isImage ? 4 : 3, left: isImage ? 6 : 0),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -1210,17 +1339,21 @@ class _ChatPageState extends State<ChatPage> {
         backgroundColor: Colors.black,
         insetPadding: const EdgeInsets.all(12),
         child: InteractiveViewer(
-          child: CachedNetworkImage(imageUrl: url, fit: BoxFit.contain),
+          child: CachedNetworkImage(
+            imageUrl: PublicUrl.media(url),
+            fit: BoxFit.contain,
+          ),
         ),
       ),
     );
   }
 
   Widget _audioBubble(Map<String, dynamic> m, bool mine) {
-    final id = m["id"]?.toString() ?? UniqueKey().toString();
+    final id = m["id"]?.toString() ??
+        "${m["senderId"]}:${m["createdAt"]}:${m["content"].hashCode}";
     final raw = m["content"].toString();
     final parts = raw.split("#");
-    final url = parts.first;
+    final url = PublicUrl.media(parts.first);
     final secs = parts.length > 1 ? (int.tryParse(parts[1]) ?? 30) : 30;
     final ctrl = _voiceControllers[id] ??= VoiceController(
       audioSrc: url,
@@ -1278,7 +1411,8 @@ class _ChatPageState extends State<ChatPage> {
                   ? "Você pediu acesso às fotos privadas."
                   : "${widget.otherName} quer ver suas fotos privadas.",
               textAlign: TextAlign.center,
-              style: const TextStyle(color: AppTheme.navy, fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                  color: AppTheme.navy, fontWeight: FontWeight.w600),
             ),
             if (!mine) ...[
               const SizedBox(height: 12),
@@ -1346,7 +1480,9 @@ class _ChatPageState extends State<ChatPage> {
                               _typingSent = typing;
                               _socket.setTyping(widget.matchId, typing);
                             }
-                            if (typing != _hasText) setState(() => _hasText = typing);
+                            if (typing != _hasText) {
+                              setState(() => _hasText = typing);
+                            }
                           },
                           textCapitalization: TextCapitalization.sentences,
                           decoration: const InputDecoration(
@@ -1358,9 +1494,10 @@ class _ChatPageState extends State<ChatPage> {
                           onSubmitted: (_) => _send(),
                         ),
                       ),
+                      _pillIcon(Icons.photo_camera_rounded, AppTheme.navy,
+                          _photoOptions),
                       _pillIcon(
-                          Icons.photo_camera_rounded, AppTheme.navy, _photoOptions),
-                      _pillIcon(Icons.card_giftcard, AppTheme.gold, _openGiftShop),
+                          Icons.card_giftcard, AppTheme.gold, _openGiftShop),
                     ],
                   ),
                 ),
@@ -1431,7 +1568,8 @@ class _ChatPageState extends State<ChatPage> {
           const Icon(Icons.mic, color: Colors.white, size: 24),
       sendButtonIcon:
           const Icon(Icons.send_rounded, color: AppTheme.navy, size: 22),
-      lockButton: const Icon(Icons.lock_outline, color: AppTheme.navy, size: 20),
+      lockButton:
+          const Icon(Icons.lock_outline, color: AppTheme.navy, size: 20),
     );
   }
 
@@ -1471,11 +1609,56 @@ class _ChatPageState extends State<ChatPage> {
   /// Seletor rápido de emojis (insere no campo).
   void _openEmoji() {
     const emojis = [
-      "😀","😁","😂","🥰","😍","😘","😊","😉","🙂","😎",
-      "🤩","😇","🤗","😅","😋","😏","🥲","😴","🤔","🙄",
-      "❤️","🧡","💛","💚","💙","💜","🤍","💖","💕","💘",
-      "🙏","✝️","🕊️","🎶","☕","🌹","🌻","✨","🔥","👍",
-      "👏","🙌","😢","😭","😡","🤝","💍","🎁","🥳","💯",
+      "😀",
+      "😁",
+      "😂",
+      "🥰",
+      "😍",
+      "😘",
+      "😊",
+      "😉",
+      "🙂",
+      "😎",
+      "🤩",
+      "😇",
+      "🤗",
+      "😅",
+      "😋",
+      "😏",
+      "🥲",
+      "😴",
+      "🤔",
+      "🙄",
+      "❤️",
+      "🧡",
+      "💛",
+      "💚",
+      "💙",
+      "💜",
+      "🤍",
+      "💖",
+      "💕",
+      "💘",
+      "🙏",
+      "✝️",
+      "🕊️",
+      "🎶",
+      "☕",
+      "🌹",
+      "🌻",
+      "✨",
+      "🔥",
+      "👍",
+      "👏",
+      "🙌",
+      "😢",
+      "😭",
+      "😡",
+      "🤝",
+      "💍",
+      "🎁",
+      "🥳",
+      "💯",
     ];
     showModalBottomSheet(
       context: context,
@@ -1509,10 +1692,11 @@ class _ChatPageState extends State<ChatPage> {
   }
 }
 
-
 /// Bolha de "digitando..." com 3 bolinhas animadas (estilo WhatsApp).
 class TypingBubble extends StatefulWidget {
-  const TypingBubble({super.key});
+  final String? label;
+
+  const TypingBubble({super.key, this.label});
 
   @override
   State<TypingBubble> createState() => _TypingBubbleState();
@@ -1550,32 +1734,48 @@ class _TypingBubbleState extends State<TypingBubble>
             BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 4),
           ],
         ),
-        child: AnimatedBuilder(
-          animation: _c,
-          builder: (_, __) {
-            return Row(
-              mainAxisSize: MainAxisSize.min,
-              children: List.generate(3, (i) {
-                // Cada bolinha "pula" com um pequeno atraso entre elas.
-                final t = (_c.value - i * 0.2) % 1.0;
-                final scale = t < 0.5 ? 0.6 + (t * 2) * 0.6 : 0.6 + (2 - t * 2) * 0.6;
-                return Padding(
-                  padding: EdgeInsets.only(right: i == 2 ? 0 : 5),
-                  child: Transform.scale(
-                    scale: scale.clamp(0.6, 1.2),
-                    child: Container(
-                      width: 8,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        color: AppTheme.gold.withOpacity(0.85),
-                        shape: BoxShape.circle,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AnimatedBuilder(
+              animation: _c,
+              builder: (_, __) {
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: List.generate(3, (i) {
+                    final t = (_c.value - i * 0.2) % 1.0;
+                    final scale =
+                        t < 0.5 ? 0.6 + (t * 2) * 0.6 : 0.6 + (2 - t * 2) * 0.6;
+                    return Padding(
+                      padding: EdgeInsets.only(right: i == 2 ? 0 : 5),
+                      child: Transform.scale(
+                        scale: scale.clamp(0.6, 1.2),
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: AppTheme.gold.withOpacity(0.85),
+                            shape: BoxShape.circle,
+                          ),
+                        ),
                       ),
-                    ),
-                  ),
+                    );
+                  }),
                 );
-              }),
-            );
-          },
+              },
+            ),
+            if (widget.label != null) ...[
+              const SizedBox(width: 10),
+              Text(
+                widget.label!,
+                style: const TextStyle(
+                  color: AppTheme.navy,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     );

@@ -4,54 +4,11 @@ import fs from "fs";
 import path from "path";
 import { z } from "zod";
 import { prisma } from "../../config/prisma";
+import { lockAdSettings } from "../../lib/adSettingsLock";
 import { AppError } from "../../lib/errors";
 import { UPLOADS_DIR } from "../../config/paths";
+import { clearSsvRejection } from "../rewards/ssvDiagnostics";
 import { emitToAll } from "../../sockets";
-
-// ───────────────────────── Produtos (planos / pacotes) ─────────────────────────
-
-const productSchema = z.object({
-  kind: z.enum(["PREMIUM", "CREDITS", "SUPERLIKES", "BOOSTS"]),
-  title: z.string().min(1),
-  description: z.string().optional().nullable(),
-  googleProductId: z.string().optional().nullable(),
-  priceCents: z.number().int().min(0).default(0),
-  amount: z.number().int().min(0).default(0),
-  durationDays: z.number().int().min(0).optional().nullable(),
-  active: z.boolean().default(true),
-  sortOrder: z.number().int().default(0),
-});
-
-// GET /api/admin/products
-export async function listProducts(_req: Request, res: Response) {
-  const products = await prisma.product.findMany({
-    orderBy: [{ kind: "asc" }, { sortOrder: "asc" }, { priceCents: "asc" }],
-  });
-  res.json({ products });
-}
-
-// POST /api/admin/products
-export async function createProduct(req: Request, res: Response) {
-  const data = productSchema.parse(req.body);
-  const product = await prisma.product.create({ data });
-  emitToAll("config:store", { changed: true });
-  res.status(201).json({ product });
-}
-
-// PUT /api/admin/products/:id
-export async function updateProduct(req: Request, res: Response) {
-  const data = productSchema.partial().parse(req.body);
-  const product = await prisma.product.update({ where: { id: req.params.id }, data });
-  emitToAll("config:store", { changed: true });
-  res.json({ product });
-}
-
-// DELETE /api/admin/products/:id
-export async function deleteProduct(req: Request, res: Response) {
-  await prisma.product.delete({ where: { id: req.params.id } });
-  emitToAll("config:store", { changed: true });
-  res.json({ ok: true });
-}
 
 // ───────────────────────── Presentes (gifts) ─────────────────────────
 
@@ -115,36 +72,7 @@ export async function deleteGift(req: Request, res: Response) {
   res.json({ ok: true });
 }
 
-// ───────────────────────── Config de monetização (valor do crédito) ─────────────────────────
-
-const monetizationSchema = z.object({
-  creditPriceCents: z.number().int().min(1),
-  currency: z.string().min(1).default("BRL"),
-});
-
-// GET /api/admin/monetization
-export async function getMonetization(_req: Request, res: Response) {
-  const settings = await prisma.monetizationSettings.upsert({
-    where: { id: 1 },
-    create: { id: 1 },
-    update: {},
-  });
-  res.json({ settings });
-}
-
-// PUT /api/admin/monetization
-export async function updateMonetization(req: Request, res: Response) {
-  const data = monetizationSchema.parse(req.body);
-  const settings = await prisma.monetizationSettings.upsert({
-    where: { id: 1 },
-    create: { id: 1, ...data },
-    update: data,
-  });
-  emitToAll("config:store", { changed: true });
-  res.json({ settings });
-}
-
-// ───────────────────────── Anúncios (AdMob) ─────────────────────────
+// ───────────────────────── Anúncios (AdMob / Ad Manager) ─────────────────────────
 
 const adSchema = z.object({
   enabled: z.boolean(),
@@ -158,12 +86,13 @@ const adSchema = z.object({
   rewardedInterstitialEnabled: z.boolean(),
   nativeEnabled: z.boolean(),
 
-  androidAppOpenId: z.string().optional().nullable(),
-  androidBannerId: z.string().optional().nullable(),
-  androidInterstitialId: z.string().optional().nullable(),
-  androidRewardedId: z.string().optional().nullable(),
-  androidRewardedInterstitialId: z.string().optional().nullable(),
-  androidNativeId: z.string().optional().nullable(),
+  // Espaços nas pontas (comuns ao colar) quebrariam o carregamento do bloco.
+  androidAppOpenId: z.string().trim().optional().nullable(),
+  androidBannerId: z.string().trim().optional().nullable(),
+  androidInterstitialId: z.string().trim().optional().nullable(),
+  androidRewardedId: z.string().trim().optional().nullable(),
+  androidRewardedInterstitialId: z.string().trim().optional().nullable(),
+  androidNativeId: z.string().trim().optional().nullable(),
 
   bannerPosition: z.enum(["top", "bottom"]),
 
@@ -189,7 +118,50 @@ export async function getAds(_req: Request, res: Response) {
 // PUT /api/admin/ads
 export async function updateAds(req: Request, res: Response) {
   const data = adSchema.parse(req.body);
-  const ads = await prisma.adSettings.upsert({ where: { id: 1 }, create: { id: 1, ...data }, update: data });
+
+  // Lê, decide e grava com a linha travada: o PUT de Recompensas decide com
+  // base nos mesmos campos e não pode gravar sobre um retrato desatualizado.
+  const { ads, rewardedBlockChanged } = await prisma.$transaction(async (tx) => {
+    const current = await lockAdSettings(tx);
+
+    // Campo ausente no corpo = não muda (o Prisma também o ignora).
+    const before = current.androidRewardedId?.trim() || null;
+    const after =
+      data.androidRewardedId === undefined
+        ? before
+        : data.androidRewardedId?.trim() || null;
+    const rewardedBlockChanged = before !== after;
+
+    // Com a confirmação do Google exigida, o ad_unit esperado pertence ao bloco
+    // Premiado atual: trocar o ID por trás da exigência faria todo resgate
+    // ficar pendente (ou aceitaria o bloco errado).
+    if (current.rewardsRequireSsv && rewardedBlockChanged) {
+      throw new AppError(
+        "A confirmação do Google está exigida para o bloco Premiado atual. Desligue a exigência em Recompensas antes de trocar o ID do bloco.",
+        409,
+        undefined,
+        "SSV_UNIT_LOCKED"
+      );
+    }
+
+    const saved = await tx.adSettings.update({
+      where: { id: 1 },
+      // A prova do SSV (último callback e ad_unit esperado) é do bloco antigo:
+      // com outro bloco ela precisa ser refeita, senão a exigência poderia ser
+      // religada com um ad_unit que o bloco novo nunca vai enviar.
+      data: rewardedBlockChanged
+        ? {
+            ...data,
+            rewardsSsvAdUnit: null,
+            rewardsSsvLastAt: null,
+            rewardsSsvLastAdUnit: null,
+          }
+        : data,
+    });
+    return { ads: saved, rewardedBlockChanged };
+  });
+  // A recusa guardada em memória era do bloco antigo.
+  if (rewardedBlockChanged) clearSsvRejection();
   // Avisa todos os apps conectados para recarregarem a config de anúncios na hora.
   emitToAll("config:ads", { changed: true });
   res.json({ ads });
@@ -279,14 +251,13 @@ async function getVerseList(): Promise<{ reference: string; text: string }[] | n
   return verses.length > 0 ? verses.map((v) => ({ reference: v.reference, text: v.text })) : fallback;
 }
 
-// GET /api/config/store — planos, pacotes, presentes e valor do crédito (ativos)
+// GET /api/config/store — presentes ativos (o app não vende mais planos nem pacotes)
 export async function publicStore(_req: Request, res: Response) {
-  const [products, gifts, monetization] = await Promise.all([
-    prisma.product.findMany({ where: { active: true }, orderBy: [{ kind: "asc" }, { sortOrder: "asc" }] }),
-    prisma.gift.findMany({ where: { active: true }, orderBy: { sortOrder: "asc" } }),
-    prisma.monetizationSettings.upsert({ where: { id: 1 }, create: { id: 1 }, update: {} }),
-  ]);
-  res.json({ products, gifts, creditPriceCents: monetization.creditPriceCents, currency: monetization.currency });
+  const gifts = await prisma.gift.findMany({
+    where: { active: true },
+    orderBy: { sortOrder: "asc" },
+  });
+  res.json({ gifts });
 }
 
 // GET /api/config/ads — config de anúncios (app lê em tempo real)
@@ -297,6 +268,15 @@ export async function publicAds(_req: Request, res: Response) {
     enabled: on,
     testMode: ads.testMode,
     testDeviceIds: (ads.testDeviceIds || "").split(",").map((s) => s.trim()).filter(Boolean),
+    // Quais formatos estão ligados (independe de haver ID preenchido).
+    formats: {
+      appOpen: on && ads.appOpenEnabled,
+      banner: on && ads.bannerEnabled,
+      interstitial: on && ads.interstitialEnabled,
+      rewarded: on && ads.rewardedEnabled,
+      rewardedInterstitial: on && ads.rewardedInterstitialEnabled,
+      native: on && ads.nativeEnabled,
+    },
     units: {
       appOpen: on && ads.appOpenEnabled ? ads.androidAppOpenId : null,
       banner: on && ads.bannerEnabled ? ads.androidBannerId : null,

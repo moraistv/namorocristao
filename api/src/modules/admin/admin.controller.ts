@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { Request, Response } from "express";
 import { z } from "zod";
 import { prisma } from "../../config/prisma";
@@ -5,48 +6,173 @@ import { AppError } from "../../lib/errors";
 import { hashPassword } from "../../lib/password";
 import { assertPermission, assertSuperAdmin } from "../../lib/adminPermission";
 import { ageFromBirthday } from "../../lib/age";
-import { PREMIUM_PLANS } from "../../lib/premium";
+import { PREMIUM_PLANS, isPremiumPlanId } from "../../lib/premium";
+import { isRecentlyOnline, onlineCutoff } from "../../lib/presence";
 import { notifyUsers } from "../../lib/push";
-import { emitToUser } from "../../sockets";
+import { disconnectUser, emitToUser } from "../../sockets";
 
 // ─────────── Dashboard ───────────
+type DashboardCountsRow = {
+  totalUsers: bigint;
+  male: bigint;
+  female: bigint;
+  verified: bigint;
+  online: bigint;
+  likes: bigint;
+  dislikes: bigint;
+  superlikes: bigint;
+  matches: bigint;
+  devices: bigint;
+  reports: bigint;
+  banned: bigint;
+  pendingVerifications: bigint;
+  deleteRequests: bigint;
+};
+
+const MAX_SAFE_COUNT = BigInt(Number.MAX_SAFE_INTEGER);
+
+function bigintCountToNumber(value: bigint, field: string): number {
+  if (value < 0n || value > MAX_SAFE_COUNT) {
+    throw new AppError(
+      `Contador ${field} fora do intervalo seguro do JavaScript`,
+      500
+    );
+  }
+  return Number(value);
+}
+
 // GET /api/admin/dashboard
 export async function dashboard(_req: Request, res: Response) {
-  const [
-    totalUsers,
-    male,
-    female,
-    verified,
-    likes,
-    dislikes,
-    superlikes,
-    matches,
-    devices,
-    reports,
-    banned,
-    pendingVerifications,
-    deleteRequests,
-  ] = await Promise.all([
-    prisma.profile.count(),
-    prisma.profile.count({ where: { gender: "MALE" } }),
-    prisma.profile.count({ where: { gender: "FEMALE" } }),
-    prisma.profile.count({ where: { isVerified: true } }),
-    prisma.interaction.count({ where: { type: "LIKE" } }),
-    prisma.interaction.count({ where: { type: "DISLIKE" } }),
-    prisma.interaction.count({ where: { type: "SUPERLIKE" } }),
-    prisma.match.count({ where: { isActive: true } }),
-    prisma.deviceToken.count(),
-    prisma.report.count(),
-    prisma.bannedUser.count(),
-    prisma.verificationForm.count({ where: { status: "PENDING" } }),
-    prisma.accountDeleteRequest.count({ where: { status: "PENDING" } }),
-  ]);
+  const cutoff = onlineCutoff();
+  const [counts] = await prisma.$queryRaw<DashboardCountsRow[]>(
+    Prisma.sql`
+      WITH human_users AS (
+        SELECT "id"
+        FROM "users"
+        WHERE "isBot" = false
+          AND "deletedAt" IS NULL
+      ),
+      profile_counts AS (
+        SELECT
+          COUNT(*) AS "totalUsers",
+          COUNT(*) FILTER (WHERE p."gender" = 'MALE') AS "male",
+          COUNT(*) FILTER (WHERE p."gender" = 'FEMALE') AS "female",
+          COUNT(*) FILTER (WHERE p."isVerified" = true) AS "verified",
+          COUNT(*) FILTER (
+            WHERE p."isOnline" = true
+              AND p."lastActiveAt" >= ${cutoff}
+          ) AS "online"
+        FROM "profiles" AS p
+        INNER JOIN human_users AS owner ON owner."id" = p."userId"
+      ),
+      interaction_counts AS (
+        SELECT
+          COUNT(*) FILTER (WHERE i."type" = 'LIKE') AS "likes",
+          COUNT(*) FILTER (WHERE i."type" = 'DISLIKE') AS "dislikes",
+          COUNT(*) FILTER (WHERE i."type" = 'SUPERLIKE') AS "superlikes"
+        FROM "interactions" AS i
+        INNER JOIN human_users AS sender ON sender."id" = i."fromUserId"
+        INNER JOIN human_users AS recipient ON recipient."id" = i."toUserId"
+      ),
+      match_counts AS (
+        SELECT COUNT(*) AS "matches"
+        FROM "matches" AS m
+        INNER JOIN human_users AS user_a ON user_a."id" = m."userAId"
+        INNER JOIN human_users AS user_b ON user_b."id" = m."userBId"
+        WHERE m."isActive" = true
+      ),
+      device_counts AS (
+        SELECT COUNT(*) AS "devices"
+        FROM "device_tokens" AS d
+        INNER JOIN human_users AS owner ON owner."id" = d."userId"
+      ),
+      report_counts AS (
+        SELECT COUNT(*) AS "reports"
+        FROM "reports"
+        WHERE "status" = 'PENDING'
+      ),
+      banned_counts AS (
+        SELECT COUNT(*) AS "banned"
+        FROM "banned_users" AS b
+        INNER JOIN human_users AS owner ON owner."id" = b."userId"
+      ),
+      verification_counts AS (
+        SELECT COUNT(*) AS "pendingVerifications"
+        FROM "verification_forms" AS v
+        INNER JOIN human_users AS owner ON owner."id" = v."userId"
+        WHERE v."status" = 'PENDING'
+      ),
+      delete_request_counts AS (
+        SELECT COUNT(*) AS "deleteRequests"
+        FROM "account_delete_requests" AS d
+        INNER JOIN human_users AS owner ON owner."id" = d."userId"
+        WHERE d."status" = 'PENDING'
+      )
+      SELECT
+        profiles."totalUsers",
+        profiles."male",
+        profiles."female",
+        profiles."verified",
+        profiles."online",
+        interactions."likes",
+        interactions."dislikes",
+        interactions."superlikes",
+        matches."matches",
+        devices."devices",
+        reports."reports",
+        banned."banned",
+        verifications."pendingVerifications",
+        delete_requests."deleteRequests"
+      FROM profile_counts AS profiles
+      CROSS JOIN interaction_counts AS interactions
+      CROSS JOIN match_counts AS matches
+      CROSS JOIN device_counts AS devices
+      CROSS JOIN report_counts AS reports
+      CROSS JOIN banned_counts AS banned
+      CROSS JOIN verification_counts AS verifications
+      CROSS JOIN delete_request_counts AS delete_requests
+    `
+  );
 
-  const online = await prisma.profile.count({ where: { isOnline: true } });
+  if (!counts) {
+    throw new AppError("Não foi possível calcular o dashboard", 500);
+  }
+
+  const totalUsers = bigintCountToNumber(counts.totalUsers, "users.total");
+  const male = bigintCountToNumber(counts.male, "users.male");
+  const female = bigintCountToNumber(counts.female, "users.female");
+  const verified = bigintCountToNumber(counts.verified, "users.verified");
+  const online = bigintCountToNumber(counts.online, "users.online");
+  const likes = bigintCountToNumber(counts.likes, "interactions.likes");
+  const dislikes = bigintCountToNumber(
+    counts.dislikes,
+    "interactions.dislikes"
+  );
+  const superlikes = bigintCountToNumber(
+    counts.superlikes,
+    "interactions.superlikes"
+  );
+  const matches = bigintCountToNumber(counts.matches, "matches");
+  const devices = bigintCountToNumber(counts.devices, "devices");
+  const reports = bigintCountToNumber(counts.reports, "reports");
+  const banned = bigintCountToNumber(counts.banned, "banned");
+  const pendingVerifications = bigintCountToNumber(
+    counts.pendingVerifications,
+    "pendingVerifications"
+  );
+  const deleteRequests = bigintCountToNumber(
+    counts.deleteRequests,
+    "deleteRequests"
+  );
 
   res.json({
     users: { total: totalUsers, male, female, verified, online },
-    interactions: { likes, dislikes, superlikes, total: likes + dislikes + superlikes },
+    interactions: {
+      likes,
+      dislikes,
+      superlikes,
+      total: likes + dislikes + superlikes,
+    },
     matches,
     devices,
     reports,
@@ -64,7 +190,11 @@ export async function signupsSeries(req: Request, res: Response) {
   since.setDate(since.getDate() - (days - 1));
 
   const users = await prisma.user.findMany({
-    where: { createdAt: { gte: since } },
+    where: {
+      createdAt: { gte: since },
+      isBot: false,
+      deletedAt: null,
+    },
     select: { createdAt: true },
   });
 
@@ -158,6 +288,7 @@ function resolveUf(
 // GET /api/admin/stats/locations — usuários por estado (BR) e por cidade.
 export async function locationStats(_req: Request, res: Response) {
   const profiles = await prisma.profile.findMany({
+    where: { user: { isBot: false, deletedAt: null } },
     select: { city: true, addressText: true },
   });
 
@@ -198,7 +329,10 @@ export async function listUsers(req: Request, res: Response) {
   const take = Math.min(Number(req.query.take) || 30, 100);
   const skip = Number(req.query.skip) || 0;
 
-  const and: any[] = [];
+  const now = new Date();
+  const and: Prisma.ProfileWhereInput[] = [
+    { user: { isBot: false, deletedAt: null } },
+  ];
   if (search) {
     and.push({
       OR: [
@@ -211,9 +345,12 @@ export async function listUsers(req: Request, res: Response) {
     and.push({ user: { isBanned: true } });
   }
   if (onlyOnline) {
-    and.push({ isOnline: true });
+    and.push({
+      isOnline: true,
+      lastActiveAt: { gte: onlineCutoff(now) },
+    });
   }
-  const where = and.length ? { AND: and } : {};
+  const where: Prisma.ProfileWhereInput = { AND: and };
 
   const [items, total] = await Promise.all([
     prisma.profile.findMany({
@@ -226,7 +363,7 @@ export async function listUsers(req: Request, res: Response) {
     prisma.profile.count({ where }),
   ]);
 
-  const now = Date.now();
+  const nowMs = now.getTime();
   res.json({
     total,
     users: items.map((p) => ({
@@ -239,9 +376,10 @@ export async function listUsers(req: Request, res: Response) {
       city: p.city,
       isVerified: p.isVerified,
       isBanned: p.user.isBanned,
-      isSuspended: !!p.user.suspendedUntil && p.user.suspendedUntil.getTime() > now,
+      isSuspended:
+        !!p.user.suspendedUntil && p.user.suspendedUntil.getTime() > nowMs,
       suspendedUntil: p.user.suspendedUntil,
-      isOnline: p.isOnline,
+      isOnline: isRecentlyOnline(p, now),
       lastActiveAt: p.lastActiveAt,
       profilePicture: p.profilePicture,
       createdAt: p.createdAt,
@@ -311,14 +449,11 @@ export async function userDetail(req: Request, res: Response) {
     take: 15,
   });
 
-  // Gasto estimado a partir do plano premium (não há histórico de pagamentos).
-  const PLAN_PRICES: Record<string, { label: string; price: number }> = {
-    monthly: { label: "Mensal", price: 29.9 },
-    quarterly: { label: "Trimestral", price: 69.9 },
-    yearly: { label: "Anual", price: 199.9 },
-  };
-  const plan = user.premiumPlan ? PLAN_PRICES[user.premiumPlan] : null;
-  const estimatedSpend = user.isPremium && plan ? plan.price : 0;
+  // VIP é concedido pelo painel; o rótulo vem da duração escolhida.
+  const planLabel =
+    user.premiumPlan && isPremiumPlanId(user.premiumPlan)
+      ? PREMIUM_PLANS[user.premiumPlan].label
+      : null;
 
   const photos = user.profile?.mediaFiles?.length ?? 0;
   const lockedPhotos = user.profile?.lockedPhotos?.length ?? 0;
@@ -346,9 +481,10 @@ export async function userDetail(req: Request, res: Response) {
       isPremium: user.isPremium,
       isSuspended: !!user.suspendedUntil && user.suspendedUntil.getTime() > Date.now(),
       suspendedUntil: user.suspendedUntil,
-      premiumPlan: plan?.label ?? null,
+      premiumPlan: planLabel,
       premiumUntil: user.premiumUntil,
       superLikesUsedToday: user.superLikesUsedToday,
+      bonusSuperLikes: user.bonusSuperLikes,
       boostsRemaining: user.boostsRemaining,
       credits: user.credits,
       createdAt: user.createdAt,
@@ -368,9 +504,7 @@ export async function userDetail(req: Request, res: Response) {
     })),
     billing: {
       isPremium: user.isPremium,
-      plan: plan?.label ?? null,
-      planPrice: plan?.price ?? null,
-      estimatedSpend,
+      plan: planLabel,
       premiumUntil: user.premiumUntil,
     },
     stats: {
@@ -430,6 +564,7 @@ export async function banUser(req: Request, res: Response) {
     }),
   ]);
   emitToUser(userId, "config:me", { banned: true });
+  disconnectUser(userId);
   res.json({ ok: true });
 }
 
@@ -463,6 +598,7 @@ export async function suspendUser(req: Request, res: Response) {
     }),
   ]);
   emitToUser(userId, "config:me", { suspended: true });
+  disconnectUser(userId);
   res.json({ ok: true, suspendedUntil: until });
 }
 
@@ -527,15 +663,12 @@ export async function addCredits(req: Request, res: Response) {
   const user = await prisma.user.findUnique({ where: { id: userId } });
   if (!user) throw new AppError("Usuário não encontrado", 404);
 
-  // Super likes extras: reduz o contador de uso de hoje (libera mais hoje).
-  const newUsed = superLikes > 0 ? user.superLikesUsedToday - superLikes : user.superLikesUsedToday;
-
   const updated = await prisma.user.update({
     where: { id: userId },
     data: {
       boostsRemaining: { increment: boosts },
       credits: { increment: credits },
-      superLikesUsedToday: newUsed,
+      bonusSuperLikes: { increment: superLikes },
     },
   });
   res.json({
@@ -543,6 +676,7 @@ export async function addCredits(req: Request, res: Response) {
     boostsRemaining: updated.boostsRemaining,
     credits: updated.credits,
     superLikesUsedToday: updated.superLikesUsedToday,
+    bonusSuperLikes: updated.bonusSuperLikes,
   });
   emitToUser(userId, "config:me", { creditsChanged: true });
 }
@@ -605,7 +739,7 @@ async function userSummary(userId: string) {
     age: user.profile?.birthday ? ageFromBirthday(user.profile.birthday) : null,
     gender: user.profile?.gender ?? null,
     isVerified: user.profile?.isVerified ?? false,
-    isOnline: user.profile?.isOnline ?? false,
+    isOnline: isRecentlyOnline(user.profile),
     isBanned: user.isBanned,
     isSuspended: !!user.suspendedUntil && user.suspendedUntil.getTime() > Date.now(),
     isPremium: user.isPremium,
@@ -785,8 +919,9 @@ export async function processDeleteRequest(req: Request, res: Response) {
       data: { status: "DONE" },
     }),
   ]);
-  // Avisa o app em tempo real → desconecta na hora.
+  // Notifica clientes conectados e encerra suas sessões em tempo real.
   emitToUser(userId, "config:me", { deleted: true });
+  disconnectUser(userId);
   res.json({ ok: true });
 }
 
@@ -826,7 +961,11 @@ export async function broadcastNotification(req: Request, res: Response) {
     userIds = users.map((u) => u.id);
   } else if (audience === "online") {
     const profiles = await prisma.profile.findMany({
-      where: { isOnline: true },
+      where: {
+        isOnline: true,
+        lastActiveAt: { gte: onlineCutoff(now) },
+        user: { isBot: false, deletedAt: null },
+      },
       select: { userId: true },
     });
     userIds = profiles.map((p) => p.userId);

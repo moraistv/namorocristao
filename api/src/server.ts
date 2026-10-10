@@ -14,7 +14,7 @@ async function main() {
   const io = new SocketIOServer(httpServer, {
     path: "/api/socket.io/",
     cors: {
-      origin: env.corsOrigins.length ? env.corsOrigins : true,
+      origin: env.corsOrigins,
       credentials: true,
     },
   });

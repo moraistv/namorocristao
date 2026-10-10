@@ -6,6 +6,7 @@ import { issueTokens, verifyRefreshToken } from "../../lib/jwt";
 import { requestLoginCode, consumeLoginCode } from "../../services/otp.service";
 import { verifyGoogleIdToken } from "../../services/google.service";
 import { recordAccess } from "../../lib/accessLog";
+import { assertActiveUserAccount } from "../../lib/accountAccess";
 import {
   registerSchema,
   loginSchema,
@@ -30,20 +31,6 @@ function publicUser(user: {
     provider: user.provider,
     isPremium: user.isPremium,
   };
-}
-
-async function ensureNotBanned(userId: string) {
-  const banned = await prisma.bannedUser.findUnique({ where: { userId } });
-  if (banned) throw new AppError("Conta banida", 403);
-
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { suspendedUntil: true },
-  });
-  if (user?.suspendedUntil && user.suspendedUntil.getTime() > Date.now()) {
-    const ate = user.suspendedUntil.toLocaleDateString("pt-BR");
-    throw new AppError(`Conta suspensa até ${ate}`, 403);
-  }
 }
 
 // POST /api/auth/register
@@ -83,7 +70,7 @@ export async function login(req: Request, res: Response) {
   const ok = await verifyPassword(user.passwordHash, password);
   if (!ok) throw new AppError("Credenciais inválidas", 401);
 
-  await ensureNotBanned(user.id);
+  await assertActiveUserAccount(user.id);
 
   const tokens = issueTokens({ sub: user.id, type: "user" });
   await recordAccess(req, user.id, "login");
@@ -120,7 +107,14 @@ export async function loginWithCode(req: Request, res: Response) {
       include: { profile: true },
     });
   } else {
-    await ensureNotBanned(user.id);
+    await assertActiveUserAccount(user.id);
+    if (!user.emailVerified) {
+      user = await prisma.user.update({
+        where: { id: user.id },
+        data: { emailVerified: true },
+        include: { profile: true },
+      });
+    }
   }
 
   const tokens = issueTokens({ sub: user.id, type: "user" });
@@ -152,16 +146,20 @@ export async function loginWithGoogle(req: Request, res: Response) {
       },
       include: { profile: true },
     });
-  } else if (!user.googleId) {
-    // Vincula o Google a uma conta de e-mail existente.
+  } else if (!user.googleId || !user.emailVerified) {
+    // Vincula o Google a uma conta de e-mail existente e sincroniza a
+    // verificação comprovada pelo token validado.
     user = await prisma.user.update({
       where: { id: user.id },
-      data: { googleId: info.googleId },
+      data: {
+        googleId: user.googleId ?? info.googleId,
+        emailVerified: true,
+      },
       include: { profile: true },
     });
   }
 
-  await ensureNotBanned(user.id);
+  await assertActiveUserAccount(user.id);
 
   const tokens = issueTokens({ sub: user.id, type: "user" });
   await recordAccess(req, user.id, "google");
@@ -178,8 +176,7 @@ export async function refresh(req: Request, res: Response) {
   const payload = verifyRefreshToken(refreshToken);
   if (payload.type !== "user") throw new AppError("Token inválido", 401);
 
-  const user = await prisma.user.findUnique({ where: { id: payload.sub } });
-  if (!user) throw new AppError("Usuário não encontrado", 401);
+  const user = await assertActiveUserAccount(payload.sub);
 
   const tokens = issueTokens({ sub: user.id, type: "user" });
   res.json(tokens);

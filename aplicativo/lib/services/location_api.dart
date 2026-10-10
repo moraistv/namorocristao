@@ -31,8 +31,8 @@ class LocationApi {
             .map((c) {
               final pt = c["translations"]?["por"]?["common"];
               final name = (pt ?? c["name"]?["common"] ?? "").toString();
-              return Country(
-                  name, (c["cca2"] ?? "").toString(), (c["flag"] ?? "🌎").toString());
+              return Country(name, (c["cca2"] ?? "").toString(),
+                  (c["flag"] ?? "🌎").toString());
             })
             .where((c) => c.name.isNotEmpty)
             .toList();

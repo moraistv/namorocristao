@@ -32,8 +32,7 @@ class AnalyticsService {
   static void match() => log("match");
   static void messageSent() => log("message_sent");
   static void giftSent(String giftId) => log("gift_sent", {"gift_id": giftId});
-  static void purchase(String productId, String kind) =>
-      log("purchase", {"product_id": productId, "kind": kind});
+  static void rewardEarned(String kind) => log("reward_earned", {"kind": kind});
   static void boost() => log("boost_activated");
   static void superLike() => log("super_like");
   static void screen(String name) {

@@ -1,14 +1,21 @@
+import 'dart:async';
 import 'dart:convert';
+
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_easyloading/flutter_easyloading.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:mioamoreapp/services/app_api.dart';
 import 'package:mioamoreapp/services/location_api.dart';
+import 'package:mioamoreapp/services/location_service.dart';
+import 'package:mioamoreapp/services/public_url.dart';
+import 'package:mioamoreapp/services/push_device_service.dart';
+import 'package:mioamoreapp/services/token_storage.dart';
 import 'package:mioamoreapp/views/app/app_theme.dart';
 import 'package:mioamoreapp/views/app/main_shell.dart';
 import 'package:mioamoreapp/views/app/widgets/searchable_sheet.dart';
+import 'package:mioamoreapp/views/auth/login_page.dart';
 
 const _genderOptions = [
   {"value": "MALE", "label": "Masculino"},
@@ -19,7 +26,8 @@ const _genderOptions = [
 /// Formata a digitação como DD/MM/AAAA.
 class _DateInputFormatter extends TextInputFormatter {
   @override
-  TextEditingValue formatEditUpdate(TextEditingValue oldV, TextEditingValue newV) {
+  TextEditingValue formatEditUpdate(
+      TextEditingValue oldV, TextEditingValue newV) {
     final digits = newV.text.replaceAll(RegExp(r"\D"), "");
     final b = StringBuffer();
     for (var i = 0; i < digits.length && i < 8; i++) {
@@ -64,6 +72,9 @@ class _OnboardingPageState extends State<OnboardingPage> {
   String? _intention;
   final Set<String> _interests = {};
   final _about = TextEditingController();
+  bool _uploading = false;
+  bool _saving = false;
+  bool _leaving = false;
 
   bool get _isBR => _country?.code == "BR";
 
@@ -71,7 +82,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
   void initState() {
     super.initState();
     _country = Country("Brasil", "BR", "🇧🇷");
-    _loadStates();
+    unawaited(_loadStates());
   }
 
   @override
@@ -87,28 +98,92 @@ class _OnboardingPageState extends State<OnboardingPage> {
   }
 
   Future<void> _loadStates() async {
-    _states = await LocationApi.brStates();
-    if (mounted) setState(() {});
+    try {
+      final states = await LocationApi.brStates();
+      if (!mounted) return;
+      setState(() => _states = states);
+    } catch (error) {
+      debugPrint("Não foi possível carregar estados: $error");
+    }
   }
 
   // ───────── navegação ─────────
-  void _next() {
-    if (!_validateStep()) return;
+  Future<void> _next() async {
+    if (_uploading || _saving || _leaving || !_validateStep()) return;
     if (_step == _totalSteps - 1) {
-      _save();
+      await _save();
       return;
     }
-    _pager.nextPage(
-        duration: const Duration(milliseconds: 280), curve: Curves.easeInOut);
+    await _pager.nextPage(
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeInOut,
+    );
   }
 
-  void _back() {
-    if (_step == 0) {
-      Navigator.maybePop(context);
+  Future<void> _back() async {
+    if (_uploading || _saving || _leaving) return;
+    if (_step > 0) {
+      await _pager.previousPage(
+        duration: const Duration(milliseconds: 280),
+        curve: Curves.easeInOut,
+      );
       return;
     }
-    _pager.previousPage(
-        duration: const Duration(milliseconds: 280), curve: Curves.easeInOut);
+
+    final expectedGeneration = TokenStorage.sessionGeneration;
+    final expectedAccessToken = TokenStorage.accessToken;
+    final expectedRefreshToken = TokenStorage.refreshToken;
+    _leaving = true;
+    final leave = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text("Sair do cadastro?"),
+            content: const Text(
+              "Você pode sair para entrar com outra conta. Os dados ainda não salvos serão descartados.",
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text("Continuar cadastro"),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text("Sair / trocar conta"),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!mounted) return;
+    if (!leave) {
+      _leaving = false;
+      return;
+    }
+    if (TokenStorage.sessionGeneration != expectedGeneration ||
+        TokenStorage.accessToken != expectedAccessToken ||
+        TokenStorage.refreshToken != expectedRefreshToken) {
+      return;
+    }
+
+    try {
+      await AppApi.setOnline(false);
+    } catch (error) {
+      debugPrint("Não foi possível encerrar a presença no onboarding: $error");
+    }
+    await PushDeviceService.cleanupForLogout();
+    final cleared = await TokenStorage.clearIfCurrent(
+      expectedGeneration: expectedGeneration,
+      expectedAccessToken: expectedAccessToken,
+      expectedRefreshToken: expectedRefreshToken,
+    );
+    if (!mounted) return;
+    if (!cleared && TokenStorage.isLoggedIn) return;
+    if (TokenStorage.sessionGeneration != expectedGeneration + 1) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+      (route) => false,
+    );
   }
 
   DateTime? _parseTypedDate(String s) {
@@ -157,14 +232,18 @@ class _OnboardingPageState extends State<OnboardingPage> {
           EasyLoading.showError("Selecione o gênero");
           return false;
         }
-        final typed = _parseTypedDate(_birthdayText.text.trim());
-        if (typed != null) _birthday = typed;
+        _birthday = _parseTypedDate(_birthdayText.text.trim());
         if (_birthday == null) {
           EasyLoading.showError("Informe a data de nascimento (DD/MM/AAAA)");
           return false;
         }
-        if (_ageOf(_birthday!) < 18) {
+        final age = _ageOf(_birthday!);
+        if (age < 18) {
           EasyLoading.showError("É necessário ter ao menos 18 anos");
+          return false;
+        }
+        if (age > 80) {
+          EasyLoading.showError("Informe uma data de nascimento válida");
           return false;
         }
         return true;
@@ -179,12 +258,29 @@ class _OnboardingPageState extends State<OnboardingPage> {
           return false;
         }
         return true;
+      case 4:
+        if (_denomination == null) {
+          EasyLoading.showError("Selecione sua denominação");
+          return false;
+        }
+        if (_frequency == null) {
+          EasyLoading.showError("Informe sua frequência à igreja");
+          return false;
+        }
+        if (_intention == null) {
+          EasyLoading.showError("Selecione o que você procura");
+          return false;
+        }
+        return true;
       default:
         return true;
     }
   }
 
   Future<void> _save() async {
+    if (_saving) return;
+    setState(() => _saving = true);
+
     final city = _isBR ? _city : _cityText.text.trim();
     final stateName = _isBR ? _stateUf?.sigla : _stateText.text.trim();
     final addressParts = [
@@ -192,15 +288,21 @@ class _OnboardingPageState extends State<OnboardingPage> {
       if (stateName != null && stateName.isNotEmpty) stateName,
       _country?.name,
     ].whereType<String>();
+    final addressText = addressParts.join(" - ");
 
     EasyLoading.show(status: "Salvando...");
+    String? failure;
     try {
+      final coordinates = await LocationService.coordinates(ask: false);
+      if (!mounted) return;
       await AppApi.upsertProfile({
         "fullName": "${_firstName.text.trim()} ${_lastName.text.trim()}",
         "gender": _gender,
         "birthday": _birthday!.toIso8601String(),
         "city": city,
-        "addressText": addressParts.join(" - "),
+        "addressText": addressText,
+        if (coordinates != null) "latitude": coordinates.latitude,
+        if (coordinates != null) "longitude": coordinates.longitude,
         "denomination": _denomination,
         "churchFrequency": _frequency,
         "intention": _intention,
@@ -209,16 +311,22 @@ class _OnboardingPageState extends State<OnboardingPage> {
         "mediaFiles": _photos,
         "profilePicture": _photos.isNotEmpty ? _photos.first : null,
       });
-      EasyLoading.dismiss();
       if (!mounted) return;
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (_) => const MainShell()),
-        (r) => false,
+        (route) => false,
       );
-    } on AppApiException catch (e) {
+    } on AppApiException catch (error) {
+      failure = error.message;
+    } catch (_) {
+      failure = "Não foi possível salvar seu perfil";
+    } finally {
       EasyLoading.dismiss();
-      EasyLoading.showError(e.message);
+      if (mounted) {
+        setState(() => _saving = false);
+        if (failure != null) EasyLoading.showError(failure);
+      }
     }
   }
 
@@ -235,6 +343,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
       label: (c) => c.name,
       prefix: (c) => c.flag,
     );
+    if (!mounted) return;
     if (c != null) {
       setState(() {
         _country = c;
@@ -243,7 +352,9 @@ class _OnboardingPageState extends State<OnboardingPage> {
         _cityText.clear();
         _stateText.clear();
       });
-      if (c.code == "BR" && _states.isEmpty) _loadStates();
+      if (c.code == "BR" && _states.isEmpty) {
+        unawaited(_loadStates());
+      }
     }
   }
 
@@ -260,6 +371,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
       items: _states,
       label: (s) => "${s.nome} (${s.sigla})",
     );
+    if (!mounted) return;
     if (s != null) {
       setState(() {
         _stateUf = s;
@@ -283,14 +395,19 @@ class _OnboardingPageState extends State<OnboardingPage> {
       items: cities,
       label: (c) => c,
     );
+    if (!mounted) return;
     if (c != null) setState(() => _city = c);
   }
 
   Future<void> _addPhoto() async {
+    if (_uploading) return;
     if (_photos.length >= 6) {
       EasyLoading.showError("Máximo de 6 fotos");
       return;
     }
+
+    setState(() => _uploading = true);
+    String? failure;
     try {
       final picker = ImagePicker();
       final file = await picker.pickImage(
@@ -299,94 +416,124 @@ class _OnboardingPageState extends State<OnboardingPage> {
         maxHeight: 1080,
         imageQuality: 75,
       );
-      if (file == null) return;
+      if (file == null || !mounted) return;
       EasyLoading.show(status: "Enviando foto...");
       final bytes = await file.readAsBytes();
-      final b64 = base64Encode(bytes);
-      final ext = file.name.split(".").last.toLowerCase();
-      final url = await AppApi.uploadPhoto(b64, ext: ext == "png" ? "png" : "jpg");
-      setState(() => _photos.add(url));
-      EasyLoading.dismiss();
-    } on AppApiException catch (e) {
-      EasyLoading.dismiss();
-      EasyLoading.showError(e.message);
+      final base64 = base64Encode(bytes);
+      final extension = file.name.split(".").last.toLowerCase();
+      final url = await AppApi.uploadPhoto(
+        base64,
+        ext: extension == "png" ? "png" : "jpg",
+      );
+      if (url.trim().isEmpty) {
+        failure = "O servidor não retornou a foto enviada";
+      } else if (mounted) {
+        setState(() => _photos.add(url));
+      }
+    } on AppApiException catch (error) {
+      failure = error.message;
     } catch (_) {
+      failure = "Não foi possível enviar a foto";
+    } finally {
       EasyLoading.dismiss();
-      EasyLoading.showError("Não foi possível enviar a foto");
+      if (mounted) {
+        setState(() => _uploading = false);
+        if (failure != null) EasyLoading.showError(failure);
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppTheme.bg,
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Topo: voltar + progresso
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: Row(
-                children: [
-                  IconButton(
-                    onPressed: _back,
-                    icon: const Icon(Icons.arrow_back, color: AppTheme.navy),
-                  ),
-                  Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
-                      child: LinearProgressIndicator(
-                        value: (_step + 1) / _totalSteps,
-                        minHeight: 8,
-                        backgroundColor: const Color(0xFFE6E9F0),
-                        valueColor: AlwaysStoppedAnimation(AppTheme.gold),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) unawaited(_back());
+      },
+      child: Scaffold(
+        backgroundColor: AppTheme.bg,
+        body: SafeArea(
+          child: Column(
+            children: [
+              // Topo: voltar + progresso
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                child: Row(
+                  children: [
+                    IconButton(
+                      onPressed:
+                          _uploading || _saving || _leaving ? null : _back,
+                      tooltip: _step == 0 ? "Sair ou trocar conta" : "Voltar",
+                      icon: const Icon(Icons.arrow_back, color: AppTheme.navy),
+                    ),
+                    Expanded(
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: LinearProgressIndicator(
+                          value: (_step + 1) / _totalSteps,
+                          minHeight: 8,
+                          backgroundColor: const Color(0xFFE6E9F0),
+                          valueColor: AlwaysStoppedAnimation(AppTheme.gold),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 12),
-                  Text("${_step + 1}/$_totalSteps",
-                      style: const TextStyle(
-                          color: AppTheme.navy, fontWeight: FontWeight.bold)),
-                ],
-              ),
-            ),
-            Expanded(
-              child: PageView(
-                controller: _pager,
-                physics: const NeverScrollableScrollPhysics(),
-                onPageChanged: (i) => setState(() => _step = i),
-                children: [
-                  _stepName(),
-                  _stepPhotos(),
-                  _stepGenderBirthday(),
-                  _stepLocation(),
-                  _stepFaith(),
-                  _stepInterests(),
-                  _stepAbout(),
-                ],
-              ),
-            ),
-            // Botão continuar
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
-              child: SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _next,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.gold,
-                    foregroundColor: AppTheme.navy,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
-                  ),
-                  child: Text(_step == _totalSteps - 1 ? "Concluir" : "Continuar",
-                      style: const TextStyle(
-                          fontWeight: FontWeight.bold, fontSize: 16)),
+                    const SizedBox(width: 12),
+                    Text("${_step + 1}/$_totalSteps",
+                        style: const TextStyle(
+                            color: AppTheme.navy, fontWeight: FontWeight.bold)),
+                  ],
                 ),
               ),
-            ),
-          ],
+              Expanded(
+                child: PageView(
+                  controller: _pager,
+                  physics: const NeverScrollableScrollPhysics(),
+                  onPageChanged: (i) => setState(() => _step = i),
+                  children: [
+                    _stepName(),
+                    _stepPhotos(),
+                    _stepGenderBirthday(),
+                    _stepLocation(),
+                    _stepFaith(),
+                    _stepInterests(),
+                    _stepAbout(),
+                  ],
+                ),
+              ),
+              // Botão continuar
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _uploading || _saving || _leaving ? null : _next,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppTheme.gold,
+                      foregroundColor: AppTheme.navy,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                    ),
+                    child: _saving
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Text(
+                            _uploading
+                                ? "Enviando foto..."
+                                : _step == _totalSteps - 1
+                                    ? "Concluir"
+                                    : "Continuar",
+                            style: const TextStyle(
+                                fontWeight: FontWeight.bold, fontSize: 16),
+                          ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -401,9 +548,12 @@ class _OnboardingPageState extends State<OnboardingPage> {
         children: [
           Text(title,
               style: const TextStyle(
-                  fontSize: 24, fontWeight: FontWeight.bold, color: AppTheme.navy)),
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: AppTheme.navy)),
           const SizedBox(height: 6),
-          Text(subtitle, style: const TextStyle(color: Color(0xFF7A849C), fontSize: 14)),
+          Text(subtitle,
+              style: const TextStyle(color: Color(0xFF7A849C), fontSize: 14)),
           const SizedBox(height: 24),
           ...children,
         ],
@@ -434,7 +584,9 @@ class _OnboardingPageState extends State<OnboardingPage> {
         padding: const EdgeInsets.only(bottom: 8, top: 16),
         child: Text(t,
             style: const TextStyle(
-                fontWeight: FontWeight.bold, color: AppTheme.navy, fontSize: 15)),
+                fontWeight: FontWeight.bold,
+                color: AppTheme.navy,
+                fontSize: 15)),
       );
 
   Widget _selectField(String value, String placeholder, VoidCallback onTap,
@@ -469,7 +621,8 @@ class _OnboardingPageState extends State<OnboardingPage> {
     );
   }
 
-  Widget _chips(List<String> options, String? selected, void Function(String) onTap,
+  Widget _chips(
+      List<String> options, String? selected, void Function(String) onTap,
       {bool multi = false, Set<String>? set}) {
     return Wrap(
       spacing: 8,
@@ -484,7 +637,8 @@ class _OnboardingPageState extends State<OnboardingPage> {
               color: sel ? AppTheme.gold : Colors.white,
               borderRadius: BorderRadius.circular(22),
               border: Border.all(
-                  color: sel ? AppTheme.gold : const Color(0xFFE0E3EB), width: 1.5),
+                  color: sel ? AppTheme.gold : const Color(0xFFE0E3EB),
+                  width: 1.5),
             ),
             child: Text(o,
                 style: TextStyle(
@@ -497,11 +651,16 @@ class _OnboardingPageState extends State<OnboardingPage> {
     );
   }
 
-  Widget _stepName() => _stepWrapper("Como te chamam?", "Seu nome aparecerá no perfil.", [
+  Widget _stepName() =>
+      _stepWrapper("Como te chamam?", "Seu nome aparecerá no perfil.", [
         _label("Nome"),
-        TextField(controller: _firstName, decoration: _dec("Seu nome", Icons.person_outline)),
+        TextField(
+            controller: _firstName,
+            decoration: _dec("Seu nome", Icons.person_outline)),
         _label("Sobrenome"),
-        TextField(controller: _lastName, decoration: _dec("Seu sobrenome", Icons.badge_outlined)),
+        TextField(
+            controller: _lastName,
+            decoration: _dec("Seu sobrenome", Icons.badge_outlined)),
       ]);
 
   Widget _stepPhotos() => _stepWrapper(
@@ -527,12 +686,17 @@ class _OnboardingPageState extends State<OnboardingPage> {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            CachedNetworkImage(imageUrl: url, fit: BoxFit.cover),
+            CachedNetworkImage(
+              imageUrl: PublicUrl.media(url),
+              fit: BoxFit.cover,
+            ),
             Positioned(
               top: 4,
               right: 4,
               child: GestureDetector(
-                onTap: () => setState(() => _photos.removeAt(index)),
+                onTap: _uploading
+                    ? null
+                    : () => setState(() => _photos.removeAt(index)),
                 child: Container(
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
@@ -562,7 +726,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
       );
 
   Widget _addPhotoTile() => GestureDetector(
-        onTap: _addPhoto,
+        onTap: _uploading ? null : _addPhoto,
         child: Container(
           decoration: BoxDecoration(
             color: Colors.white,
@@ -573,7 +737,8 @@ class _OnboardingPageState extends State<OnboardingPage> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.add_a_photo_outlined, color: AppTheme.gold, size: 28),
+                Icon(Icons.add_a_photo_outlined,
+                    color: AppTheme.gold, size: 28),
                 const SizedBox(height: 4),
                 const Text("Adicionar",
                     style: TextStyle(
@@ -618,16 +783,16 @@ class _OnboardingPageState extends State<OnboardingPage> {
                   lastDate: DateTime(now.year - 18, now.month, now.day),
                   locale: const Locale("pt", "BR"),
                 );
-                if (picked != null) {
-                  setState(() {
-                    _birthday = picked;
-                    _birthdayText.text =
-                        "${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}";
-                  });
-                }
+                if (!mounted || picked == null) return;
+                setState(() {
+                  _birthday = picked;
+                  _birthdayText.text =
+                      "${picked.day.toString().padLeft(2, '0')}/${picked.month.toString().padLeft(2, '0')}/${picked.year}";
+                });
               },
               style: IconButton.styleFrom(
-                  backgroundColor: AppTheme.navy, foregroundColor: Colors.white),
+                  backgroundColor: AppTheme.navy,
+                  foregroundColor: Colors.white),
               icon: const Icon(Icons.calendar_month),
             ),
           ],
@@ -641,23 +806,29 @@ class _OnboardingPageState extends State<OnboardingPage> {
             prefix: _country?.flag),
         if (_isBR) ...[
           _label("Estado"),
-          _selectField(_stateUf == null ? "" : "${_stateUf!.nome} (${_stateUf!.sigla})",
-              "Selecione o estado", _pickState),
+          _selectField(
+              _stateUf == null ? "" : "${_stateUf!.nome} (${_stateUf!.sigla})",
+              "Selecione o estado",
+              _pickState),
           _label("Cidade"),
           _selectField(_city ?? "", "Selecione a cidade", _pickCity),
         ] else ...[
           _label("Estado/Região"),
-          TextField(controller: _stateText, decoration: _dec("Seu estado/região")),
+          TextField(
+              controller: _stateText, decoration: _dec("Seu estado/região")),
           _label("Cidade"),
           TextField(controller: _cityText, decoration: _dec("Sua cidade")),
         ],
       ]);
 
-  Widget _stepFaith() => _stepWrapper("Sua fé", "Conte sobre sua caminhada cristã.", [
+  Widget _stepFaith() => _stepWrapper(
+          "Sua fé", "Escolha uma opção em cada campo para continuar.", [
         _label("Denominação"),
-        _chips(kDenominations, _denomination, (v) => setState(() => _denomination = v)),
+        _chips(kDenominations, _denomination,
+            (v) => setState(() => _denomination = v)),
         _label("Frequência à igreja"),
-        _chips(kChurchFrequency, _frequency, (v) => setState(() => _frequency = v)),
+        _chips(kChurchFrequency, _frequency,
+            (v) => setState(() => _frequency = v)),
         _label("O que você procura?"),
         _chips(kIntentions, _intention, (v) => setState(() => _intention = v)),
       ]);
@@ -675,7 +846,8 @@ class _OnboardingPageState extends State<OnboardingPage> {
         }, multi: true, set: _interests),
       ]);
 
-  Widget _stepAbout() => _stepWrapper("Sobre você", "Uma bio curta (opcional).", [
+  Widget _stepAbout() =>
+      _stepWrapper("Sobre você", "Uma bio curta (opcional).", [
         TextField(
           controller: _about,
           maxLines: 5,

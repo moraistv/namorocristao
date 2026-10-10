@@ -1,9 +1,39 @@
 import { Server as SocketIOServer, Socket } from "socket.io";
+import { z } from "zod";
+import { assertActiveUserAccount } from "../lib/accountAccess";
 import { verifyAccessToken } from "../lib/jwt";
-import { prisma } from "../config/prisma";
 import * as chat from "../modules/chat/chat.service";
 
 let ioRef: SocketIOServer | null = null;
+
+const matchPayloadSchema = z.object({
+  matchId: z.string().uuid(),
+});
+const messagePayloadSchema = matchPayloadSchema.extend({
+  content: z.string().trim().min(1).max(10000),
+  type: z
+    .enum(["TEXT", "IMAGE", "AUDIO", "GIFT", "PHOTO_REQUEST"])
+    .optional(),
+});
+const typingPayloadSchema = matchPayloadSchema.extend({
+  isTyping: z.boolean(),
+});
+
+type SocketAck = (payload: unknown) => void;
+
+function acknowledge(callback: unknown, payload: unknown): void {
+  if (typeof callback === "function") {
+    (callback as SocketAck)(payload);
+  }
+}
+
+function socketErrorMessage(error: unknown): string {
+  return error instanceof z.ZodError
+    ? "Payload inválido"
+    : error instanceof Error
+      ? error.message
+      : "Erro inesperado";
+}
 
 export function getIO(): SocketIOServer | null {
   return ioRef;
@@ -16,38 +46,25 @@ function matchRoom(matchId: string) {
   return `match:${matchId}`;
 }
 
-// Cache leve matchId -> participantes (evita consulta a cada evento de digitação).
-const matchParticipants = new Map<string, [string, string]>();
-async function getOtherParticipant(
-  matchId: string,
-  userId: string
-): Promise<string | null> {
-  let pair = matchParticipants.get(matchId);
-  if (!pair) {
-    const m = await prisma.match.findUnique({
-      where: { id: matchId },
-      select: { userAId: true, userBId: true },
-    });
-    if (!m) return null;
-    pair = [m.userAId, m.userBId];
-    matchParticipants.set(matchId, pair);
-  }
-  return pair[0] === userId ? pair[1] : pair[0];
-}
-
 export function setupSocket(io: SocketIOServer) {
   ioRef = io;
 
-  // Autenticação no handshake: { auth: { token } }.
-  io.use((socket, next) => {
+  // Autenticação no handshake: valida o token e o estado atual da conta.
+  io.use(async (socket, next) => {
     try {
+      const authToken = socket.handshake.auth?.token;
+      const authorization = socket.handshake.headers.authorization;
       const token =
-        (socket.handshake.auth?.token as string) ||
-        (socket.handshake.headers.authorization || "").replace("Bearer ", "");
+        typeof authToken === "string"
+          ? authToken
+          : typeof authorization === "string"
+            ? authorization.replace("Bearer ", "")
+            : "";
       const payload = verifyAccessToken(token);
       if (payload.type !== "user") {
         return next(new Error("Apenas usuários do app podem conectar"));
       }
+      await assertActiveUserAccount(payload.sub);
       socket.data.userId = payload.sub;
       next();
     } catch {
@@ -61,27 +78,41 @@ export function setupSocket(io: SocketIOServer) {
     console.log(`🔌 socket conectado: user=${userId}`);
 
     // Entrar na sala de um match (e marcar como lido).
-    socket.on("match:join", async ({ matchId }, cb) => {
+    socket.on("match:join", async (payload, callback) => {
       try {
+        const { matchId } = matchPayloadSchema.parse(payload);
         await chat.assertMembership(userId, matchId);
         socket.join(matchRoom(matchId));
         const marked = await chat.markRead(userId, matchId);
         if (marked > 0) {
-          io.to(matchRoom(matchId)).emit("messages:read", { matchId, by: userId });
+          io.to(matchRoom(matchId)).emit("messages:read", {
+            matchId,
+            by: userId,
+          });
         }
-        cb?.({ ok: true });
-      } catch (e) {
-        cb?.({ ok: false, error: (e as Error).message });
+        acknowledge(callback, { ok: true });
+      } catch (error) {
+        acknowledge(callback, {
+          ok: false,
+          error: socketErrorMessage(error),
+        });
       }
     });
 
-    socket.on("match:leave", ({ matchId }) => {
-      socket.leave(matchRoom(matchId));
+    socket.on("match:leave", (payload, callback) => {
+      const parsed = matchPayloadSchema.safeParse(payload);
+      if (!parsed.success) {
+        acknowledge(callback, { ok: false, error: "Payload inválido" });
+        return;
+      }
+      socket.leave(matchRoom(parsed.data.matchId));
+      acknowledge(callback, { ok: true });
     });
 
     // Enviar mensagem.
-    socket.on("message:send", async ({ matchId, content, type }, cb) => {
+    socket.on("message:send", async (payload, callback) => {
       try {
+        const { matchId, content, type } = messagePayloadSchema.parse(payload);
         const { message, otherId } = await chat.sendMessage({
           senderId: userId,
           matchId,
@@ -91,29 +122,49 @@ export function setupSocket(io: SocketIOServer) {
         // Entrega na sala do match e na sala pessoal do destinatário.
         io.to(matchRoom(matchId)).emit("message:new", message);
         io.to(userRoom(otherId)).emit("message:new", message);
-        cb?.({ ok: true, message });
-      } catch (e) {
-        cb?.({ ok: false, error: (e as Error).message });
+        acknowledge(callback, { ok: true, message });
+      } catch (error) {
+        acknowledge(callback, {
+          ok: false,
+          error: socketErrorMessage(error),
+        });
       }
     });
 
     // Marcar como lido.
-    socket.on("message:read", async ({ matchId }, cb) => {
+    socket.on("message:read", async (payload, callback) => {
       try {
+        const { matchId } = matchPayloadSchema.parse(payload);
         const marked = await chat.markRead(userId, matchId);
-        io.to(matchRoom(matchId)).emit("messages:read", { matchId, by: userId });
-        cb?.({ ok: true, marked });
-      } catch (e) {
-        cb?.({ ok: false, error: (e as Error).message });
+        io.to(matchRoom(matchId)).emit("messages:read", {
+          matchId,
+          by: userId,
+        });
+        acknowledge(callback, { ok: true, marked });
+      } catch (error) {
+        acknowledge(callback, {
+          ok: false,
+          error: socketErrorMessage(error),
+        });
       }
     });
 
-    // Indicador de digitação. Entrega na sala pessoal do outro usuário,
-    // assim funciona tanto no chat aberto quanto na lista de conversas.
-    socket.on("typing", async ({ matchId, isTyping }) => {
-      const otherId = await getOtherParticipant(matchId, userId);
-      if (otherId) {
-        io.to(userRoom(otherId)).emit("typing", { matchId, userId, isTyping });
+    // Typing exige match ativo, participação e ausência de bloqueio.
+    socket.on("typing", async (payload, callback) => {
+      try {
+        const { matchId, isTyping } = typingPayloadSchema.parse(payload);
+        const { otherId } = await chat.assertMembership(userId, matchId);
+        io.to(userRoom(otherId)).emit("typing", {
+          matchId,
+          userId,
+          isTyping,
+        });
+        acknowledge(callback, { ok: true });
+      } catch (error) {
+        acknowledge(callback, {
+          ok: false,
+          error: socketErrorMessage(error),
+        });
       }
     });
 
@@ -121,6 +172,11 @@ export function setupSocket(io: SocketIOServer) {
       console.log(`🔌 socket desconectado: user=${userId}`);
     });
   });
+}
+
+/** Encerra imediatamente todas as conexões Socket.IO de um usuário. */
+export function disconnectUser(userId: string) {
+  ioRef?.in(userRoom(userId)).disconnectSockets(true);
 }
 
 /** Emite um evento para a sala pessoal de um usuário (ex.: novo match). */

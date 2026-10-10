@@ -10,13 +10,13 @@ import { errorHandler } from "./middlewares/errorHandler";
 export function createApp() {
   const app = express();
 
-  app.set("trust proxy", true);
+  app.set("trust proxy", env.trustProxyHops || false);
 
   app.use(helmet({ crossOriginResourcePolicy: false }));
   app.use(compression()); // gzip nas respostas — mais rápido em rede móvel
   app.use(
     cors({
-      origin: env.corsOrigins.length ? env.corsOrigins : true,
+      origin: env.corsOrigins,
       credentials: true,
     })
   );

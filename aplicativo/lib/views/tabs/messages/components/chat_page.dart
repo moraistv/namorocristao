@@ -29,7 +29,6 @@ import 'package:mioamoreapp/views/tabs/messages/components/chat_page_background.
 import 'package:social_media_recorder/audio_encoder_type.dart';
 import 'package:social_media_recorder/screen/social_media_recorder.dart';
 
-
 class ChatPage extends ConsumerStatefulWidget {
   final String otherUserId;
   final String matchId;

@@ -41,6 +41,12 @@ services:
       FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL:-}
       FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      # IA: use variáveis de ambiente (preferencial) ou configure a chave no painel.
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AI_SECRET_ENCRYPTION_KEY: ${AI_SECRET_ENCRYPTION_KEY:-}
+      AI_REQUEST_TIMEOUT_MS: ${AI_REQUEST_TIMEOUT_MS:-15000}
     volumes:
       - uploads:/app/uploads
     networks:

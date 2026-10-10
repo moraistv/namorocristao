@@ -1,13 +1,18 @@
+import 'dart:async';
 import 'dart:ui';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_easyloading/flutter_easyloading.dart';
+import 'package:mioamoreapp/services/ads_service.dart';
 import 'package:mioamoreapp/services/app_api.dart';
+import 'package:mioamoreapp/services/public_url.dart';
 import 'package:mioamoreapp/services/realtime_bus.dart';
+import 'package:mioamoreapp/services/token_storage.dart';
 import 'package:mioamoreapp/views/app/app_theme.dart';
 import 'package:mioamoreapp/views/app/chat_page.dart';
-import 'package:mioamoreapp/views/app/premium_page.dart';
+import 'package:mioamoreapp/views/app/match_celebration.dart';
 import 'package:mioamoreapp/views/app/profile_detail_view.dart';
+import 'package:mioamoreapp/views/app/rewards_page.dart';
 
 class LikesPage extends StatefulWidget {
   const LikesPage({super.key});
@@ -22,18 +27,21 @@ class _LikesPageState extends State<LikesPage> {
   List<dynamic> _likedYou = [];
   List<dynamic> _topPicks = [];
   bool _loadingPicks = true;
+  bool _pickSwipeInFlight = false;
+  int _loadGeneration = 0;
+  int _picksLoadGeneration = 0;
 
   @override
   void initState() {
     super.initState();
-    _load();
-    _loadTopPicks();
+    unawaited(_load());
+    unawaited(_loadTopPicks());
     RealtimeBus.account.addListener(_onAccountChanged);
   }
 
   void _onAccountChanged() {
     if (!mounted) return;
-    _load();
+    unawaited(_load());
   }
 
   @override
@@ -43,43 +51,80 @@ class _LikesPageState extends State<LikesPage> {
   }
 
   Future<void> _loadTopPicks() async {
+    final generation = ++_picksLoadGeneration;
+    if (!mounted) return;
     setState(() => _loadingPicks = true);
     try {
       final picks = await AppApi.getTopPicks();
-      if (!mounted) return;
+      if (!mounted || generation != _picksLoadGeneration) return;
       setState(() {
         _topPicks = picks;
         _loadingPicks = false;
       });
     } catch (_) {
-      if (mounted) setState(() => _loadingPicks = false);
+      if (!mounted || generation != _picksLoadGeneration) return;
+      setState(() => _loadingPicks = false);
     }
   }
 
   Future<void> _load() async {
+    final generation = ++_loadGeneration;
+    if (!mounted) return;
     setState(() => _loading = true);
     try {
-      final r = await AppApi.getLikes();
+      final response = await AppApi.getLikes();
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
-        _premium = r["isPremium"] == true;
-        _matches = (r["matches"] as List?) ?? [];
-        _likedYou = (r["likedYou"] as List?) ?? [];
+        _premium = response["isPremium"] == true;
+        _matches = (response["matches"] as List?) ?? [];
+        _likedYou = (response["likedYou"] as List?) ?? [];
         _loading = false;
       });
     } catch (_) {
+      if (!mounted || generation != _loadGeneration) return;
       setState(() => _loading = false);
     }
   }
 
-  Future<void> _subscribeDialog() async {
-    final ok = await Navigator.push<bool>(
-      context,
-      MaterialPageRoute(
-        builder: (_) =>
-            const PremiumPage(highlight: "Veja quem já te curtiu e dê match!"),
+  /// Ver quem curtiu é exclusivo VIP (concedido pela equipe); não há compra.
+  Future<void> _showVipOnlyInfo() async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(children: [
+          Icon(Icons.workspace_premium, color: AppTheme.gold),
+          const SizedBox(width: 8),
+          const Text("Recurso VIP"),
+        ]),
+        content: const Text(
+          "Ver quem já te curtiu é um recurso exclusivo para usuários VIP.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text("Entendi"),
+          ),
+        ],
       ),
     );
-    if (ok == true) _load();
+  }
+
+  /// Leva às recompensas por anúncio quando os Super Likes acabam.
+  Future<void> _openRewardsForSuperLikes() async {
+    if (!AdsService.rewardedAvailable) {
+      EasyLoading.showInfo("Seus Super Likes de hoje acabaram. Volte amanhã!");
+      return;
+    }
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => const RewardsPage(
+          highlight:
+              "Seus Super Likes acabaram. Assista a um anúncio e ganhe mais.",
+        ),
+      ),
+    );
   }
 
   @override
@@ -97,8 +142,8 @@ class _LikesPageState extends State<LikesPage> {
                   Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: Container(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
                           color: AppTheme.gold.withOpacity(0.18),
                           borderRadius: BorderRadius.circular(20)),
@@ -214,12 +259,12 @@ class _LikesPageState extends State<LikesPage> {
 
   Widget _pickCard(dynamic u) {
     final photos = (u["mediaFiles"] as List?)?.cast<String>() ?? [];
-    final photo = photos.isNotEmpty
-        ? photos.first
-        : u["profilePicture"]?.toString();
+    final photo =
+        photos.isNotEmpty ? photos.first : u["profilePicture"]?.toString();
     final name = u["name"]?.toString() ?? "";
     final age = u["age"];
     final match = u["matchPercent"];
+    final isVirtual = u["isVirtual"] == true || u["isBot"] == true;
     return GestureDetector(
       onTap: () async {
         await Navigator.push(
@@ -241,7 +286,10 @@ class _LikesPageState extends State<LikesPage> {
           fit: StackFit.expand,
           children: [
             if (photo != null)
-              CachedNetworkImage(imageUrl: photo, fit: BoxFit.cover)
+              CachedNetworkImage(
+                imageUrl: PublicUrl.media(photo),
+                fit: BoxFit.cover,
+              )
             else
               Container(color: AppTheme.navy),
             const Positioned.fill(
@@ -255,6 +303,27 @@ class _LikesPageState extends State<LikesPage> {
                 ),
               ),
             ),
+            if (isVirtual)
+              Positioned(
+                top: 10,
+                left: 10,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: AppTheme.gold,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    "Perfil virtual • IA",
+                    style: TextStyle(
+                      color: AppTheme.navy,
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
             if (match is num)
               Positioned(
                 top: 10,
@@ -292,30 +361,118 @@ class _LikesPageState extends State<LikesPage> {
     );
   }
 
-  Future<void> _pickSwipe(dynamic u, String type) async {
-    try {
-      final res = await AppApi.swipe(u["id"].toString(), type);
-      if (res["matched"] == true && mounted) {
-        EasyLoading.showSuccess("É um match! 💛");
+  Future<void> _pickSwipe(dynamic user, String type) async {
+    if (_pickSwipeInFlight) return;
+    String? note;
+    if (type == "SUPERLIKE") {
+      try {
+        final stats = await AppApi.getStats();
+        final premium = stats["isPremium"] == true;
+        final remaining = (stats["superLikesLeft"] as num?)?.toInt() ?? 0;
+        if (!premium && remaining <= 0) {
+          if (mounted) await _openRewardsForSuperLikes();
+          return;
+        }
+      } on AppApiException catch (error) {
+        EasyLoading.showError(error.message);
+        return;
       }
-      _loadTopPicks();
-    } on AppApiException catch (e) {
-      if (e.statusCode == 403 && mounted) {
-        await Navigator.push(
+
+      note = await _askPickSuperNote();
+      if (note == null || !mounted) return;
+    }
+
+    _pickSwipeInFlight = true;
+    EasyLoading.show(status: "Registrando sua escolha...");
+    try {
+      final response = await AppApi.swipe(
+        user["id"].toString(),
+        type,
+        note: note,
+      );
+      EasyLoading.dismiss();
+      if (!mounted) return;
+
+      if (response["matched"] == true) {
+        final withUser = response["withUser"] as Map?;
+        await showMatchCelebration(
           context,
-          MaterialPageRoute(
-              builder: (_) => const PremiumPage(
-                  highlight: "Tenha mais Super Likes com o VIP")),
+          matchId: response["matchId"].toString(),
+          otherName: (withUser?["name"] ?? user["name"]).toString(),
+          otherPhoto:
+              (withUser?["photo"] ?? user["profilePicture"])?.toString(),
+          otherUserId: (withUser?["userId"] ?? user["id"])?.toString(),
+          myPhoto: TokenStorage.myPhoto,
+          otherIsVirtual: withUser?["isVirtual"] == true ||
+              withUser?["isBot"] == true ||
+              user["isVirtual"] == true ||
+              user["isBot"] == true,
         );
       }
-    } catch (_) {}
+      if (mounted) await _loadTopPicks();
+    } on AppApiException catch (error) {
+      EasyLoading.dismiss();
+      if (mounted) EasyLoading.showError(error.message);
+      if (error.statusCode == 403 && mounted && type == "SUPERLIKE") {
+        await _openRewardsForSuperLikes();
+      }
+    } catch (_) {
+      EasyLoading.dismiss();
+      if (mounted) {
+        EasyLoading.showError(
+          "Não foi possível registrar sua escolha. Tente novamente.",
+        );
+      }
+    } finally {
+      _pickSwipeInFlight = false;
+    }
+  }
+
+  Future<String?> _askPickSuperNote() async {
+    final controller = TextEditingController();
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text("Super Like"),
+          content: TextField(
+            controller: controller,
+            maxLength: 200,
+            maxLines: 2,
+            decoration: const InputDecoration(
+              hintText: "Recado opcional",
+              border: OutlineInputBorder(),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text("Cancelar"),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, ""),
+              child: const Text("Sem recado"),
+            ),
+            ElevatedButton(
+              onPressed: () =>
+                  Navigator.pop(dialogContext, controller.text.trim()),
+              child: const Text("Enviar"),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
   }
 
   Widget _sectionTitle(String t) => Padding(
         padding: const EdgeInsets.symmetric(vertical: 12),
         child: Text(t,
             style: const TextStyle(
-                fontSize: 16, fontWeight: FontWeight.bold, color: AppTheme.navy)),
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+                color: AppTheme.navy)),
       );
 
   Widget _emptyText(String t) => Padding(
@@ -338,24 +495,32 @@ class _LikesPageState extends State<LikesPage> {
   Widget _card(dynamic u, bool locked) {
     final photo = u["profilePicture"]?.toString();
     final fullName = u["name"]?.toString() ?? "";
-    final name = fullName.split(" ").first; // só o 1º nome (não empurra a cidade)
+    final name =
+        fullName.split(" ").first; // só o 1º nome (não empurra a cidade)
     final age = u["age"];
     final city = u["city"]?.toString();
     final dist = u["distanceKm"];
     final superLike = u["superLike"] == true;
     final matchId = u["matchId"]?.toString();
+    final isVirtual = u["isVirtual"] == true || u["isBot"] == true;
 
     return GestureDetector(
       onTap: () {
         if (locked) {
-          _subscribeDialog();
+          unawaited(_showVipOnlyInfo());
         } else if (matchId != null) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) => ChatPage(
-                  matchId: matchId, otherName: name, otherPhoto: photo,
-                  otherUserId: u["userId"]?.toString()),
+          unawaited(
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => ChatPage(
+                  matchId: matchId,
+                  otherName: name,
+                  otherPhoto: photo,
+                  otherUserId: u["userId"]?.toString(),
+                  otherIsVirtual: isVirtual,
+                ),
+              ),
             ),
           );
         }
@@ -366,7 +531,10 @@ class _LikesPageState extends State<LikesPage> {
           fit: StackFit.expand,
           children: [
             if (photo != null)
-              CachedNetworkImage(imageUrl: photo, fit: BoxFit.cover)
+              CachedNetworkImage(
+                imageUrl: PublicUrl.media(photo),
+                fit: BoxFit.cover,
+              )
             else
               Container(color: AppTheme.navy),
             if (locked)
@@ -411,6 +579,20 @@ class _LikesPageState extends State<LikesPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  if (!locked && isVirtual)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 3),
+                      child: Text(
+                        "Perfil virtual • IA",
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Color(0xFFD4AF37),
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
                   Text(
                     locked ? "•••• ••" : "$name${age != null ? ", $age" : ""}",
                     maxLines: 1,
@@ -428,9 +610,7 @@ class _LikesPageState extends State<LikesPage> {
                         const SizedBox(width: 2),
                         Expanded(
                           child: Text(
-                            dist != null
-                                ? "$dist km"
-                                : (city ?? ""),
+                            dist != null ? "$dist km" : (city ?? ""),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(

@@ -7,11 +7,7 @@ import { AppError } from "../../lib/errors";
 import { isAdult } from "../../lib/age";
 import { UPLOADS_DIR } from "../../config/paths";
 import { upsertProfileSchema, locationSchema } from "./profile.validators";
-import {
-  PREMIUM_PLANS,
-  ensureDailyReset,
-  premiumStats,
-} from "../../lib/premium";
+import { ensureDailyReset, premiumStats } from "../../lib/premium";
 
 // GET /api/me/profile
 export async function getMyProfile(req: Request, res: Response) {
@@ -49,6 +45,9 @@ export async function upsertMyProfile(req: Request, res: Response) {
       tiktok: data.tiktok,
       twitter: data.twitter,
       facebook: data.facebook,
+      latitude: data.latitude,
+      longitude: data.longitude,
+      addressText: data.addressText,
       prompts: data.prompts ?? undefined,
     },
     update: {
@@ -68,6 +67,9 @@ export async function upsertMyProfile(req: Request, res: Response) {
       tiktok: data.tiktok,
       twitter: data.twitter,
       facebook: data.facebook,
+      latitude: data.latitude,
+      longitude: data.longitude,
+      addressText: data.addressText,
       prompts: data.prompts ?? undefined,
     },
   });
@@ -75,34 +77,68 @@ export async function upsertMyProfile(req: Request, res: Response) {
   res.json({ profile });
 }
 
+/** Aborta (e reverte) a transação do Boost quando não há saldo. */
+class NoBoostsSignal extends Error {}
+
 // POST /api/me/boost — ativa o Turbo (consome 1 boost; destaque por X min)
 export async function activateBoost(req: Request, res: Response) {
   const userId = req.userId!;
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) throw new AppError("Usuário não encontrado", 404);
-  if (user.boostsRemaining <= 0) {
+  // Só leitura (sem upsert): ativações simultâneas não disputam a criação da linha.
+  const settings = await prisma.appSettings.findUnique({ where: { id: 1 } });
+  const boostMinutes = settings?.boostDurationMin ?? 30;
+  const until = new Date(Date.now() + boostMinutes * 60000);
+
+  const outcome = await prisma
+    .$transaction(async (tx) => {
+      const profile = await tx.profile.findUnique({
+        where: { userId },
+        select: { id: true },
+      });
+      if (!profile) return "NO_PROFILE" as const;
+
+      // Porta atômica: só um pedido consegue abrir a janela do Boost; os
+      // simultâneos esperam o primeiro e encontram o Boost já ativo.
+      const opened = await tx.profile.updateMany({
+        where: {
+          userId,
+          OR: [{ boostUntil: null }, { boostUntil: { lte: new Date() } }],
+        },
+        data: { boostUntil: until },
+      });
+      if (opened.count !== 1) return "ACTIVE" as const;
+
+      // Decremento condicionado: nunca passa do saldo. Sem saldo, desfaz a
+      // janela aberta acima (a transação inteira é revertida).
+      const consumed = await tx.user.updateMany({
+        where: { id: userId, boostsRemaining: { gt: 0 } },
+        data: { boostsRemaining: { decrement: 1 } },
+      });
+      if (consumed.count !== 1) throw new NoBoostsSignal();
+      return "OK" as const;
+    })
+    .catch((error: unknown) => {
+      if (error instanceof NoBoostsSignal) return "NO_BOOSTS" as const;
+      throw error;
+    });
+
+  if (outcome === "NO_PROFILE") {
+    throw new AppError("Crie seu perfil antes de usar um Boost", 404);
+  }
+  if (outcome === "ACTIVE") {
+    throw new AppError(
+      "Você já tem um Boost ativo.",
+      409,
+      undefined,
+      "BOOST_ACTIVE"
+    );
+  }
+  if (outcome === "NO_BOOSTS") {
     return res.status(403).json({
-      error: "Você não tem Boosts. Compre para se destacar!",
+      error: "Você não tem Boosts. Assista a um anúncio para ganhar um!",
       code: "NO_BOOSTS",
     });
   }
-  const settings = await prisma.appSettings.upsert({
-    where: { id: 1 },
-    create: { id: 1 },
-    update: {},
-  });
-  const until = new Date(Date.now() + settings.boostDurationMin * 60000);
-  await prisma.$transaction([
-    prisma.user.update({
-      where: { id: userId },
-      data: { boostsRemaining: { decrement: 1 } },
-    }),
-    prisma.profile.updateMany({
-      where: { userId },
-      data: { boostUntil: until },
-    }),
-  ]);
-  res.json({ ok: true, boostUntil: until, minutes: settings.boostDurationMin });
+  res.json({ ok: true, boostUntil: until, minutes: boostMinutes });
 }
 
 // POST /api/me/incognito  { enabled }
@@ -133,49 +169,6 @@ export async function setIncognito(req: Request, res: Response) {
   res.json({ ok: true, incognito: enabled });
 }
 
-// POST /api/me/purchase  { productId }
-// Concede o produto comprado. (Integração com a Google Play Billing: a verificação
-// do token de compra deve ser adicionada antes de produção — por ora concede direto.)
-export async function redeemProduct(req: Request, res: Response) {
-  const userId = req.userId!;
-  const productId = String(req.body?.productId ?? "");
-  if (!productId) throw new AppError("productId é obrigatório", 422);
-
-  const product = await prisma.product.findUnique({ where: { id: productId } });
-  if (!product || !product.active) throw new AppError("Produto indisponível", 404);
-
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) throw new AppError("Usuário não encontrado", 404);
-
-  const data: Record<string, unknown> = {};
-  if (product.kind === "PREMIUM") {
-    const days = product.durationDays ?? 30;
-    const base =
-      user.premiumUntil && user.premiumUntil > new Date()
-        ? user.premiumUntil
-        : new Date();
-    data.isPremium = true;
-    data.premiumPlan = product.googleProductId ?? "plan";
-    data.premiumUntil = new Date(base.getTime() + days * 86400000);
-  } else if (product.kind === "CREDITS") {
-    data.credits = { increment: product.amount };
-  } else if (product.kind === "BOOSTS") {
-    data.boostsRemaining = { increment: product.amount };
-  } else if (product.kind === "SUPERLIKES") {
-    // libera super likes extras hoje (reduz o contador de uso)
-    data.superLikesUsedToday = user.superLikesUsedToday - product.amount;
-  }
-
-  const updated = await prisma.user.update({ where: { id: userId }, data });
-  res.json({
-    ok: true,
-    kind: product.kind,
-    credits: updated.credits,
-    boostsRemaining: updated.boostsRemaining,
-    isPremium: updated.isPremium,
-  });
-}
-
 // PUT /api/me/location
 export async function updateLocation(req: Request, res: Response) {
   const { latitude, longitude, addressText } = locationSchema.parse(req.body);
@@ -196,47 +189,10 @@ export async function setOnline(req: Request, res: Response) {
   res.json({ isOnline: profile.isOnline });
 }
 
-// POST /api/me/premium  { plan? , active? }
-// Ativa um plano VIP (monthly/quarterly/yearly) ou liga/desliga em modo dev.
-export async function setPremium(req: Request, res: Response) {
-  const plan = req.body?.plan ? String(req.body.plan) : undefined;
-
-  // Desativar explicitamente.
-  if (req.body?.active === false) {
-    const user = await prisma.user.update({
-      where: { id: req.userId! },
-      data: { isPremium: false, premiumPlan: null, premiumUntil: null },
-    });
-    return res.json(premiumStats(user));
-  }
-
-  // Assinar um plano com validade.
-  if (plan && PREMIUM_PLANS[plan]) {
-    const { days } = PREMIUM_PLANS[plan];
-    const base = new Date();
-    const until = new Date(base.getTime() + days * 24 * 60 * 60 * 1000);
-    const user = await prisma.user.update({
-      where: { id: req.userId! },
-      data: { isPremium: true, premiumPlan: plan, premiumUntil: until },
-    });
-    return res.json(premiumStats(user));
-  }
-
-  // Compat dev: { active: true } sem plano → premium "infinito" de teste.
-  const user = await prisma.user.update({
-    where: { id: req.userId! },
-    data: { isPremium: true, premiumPlan: "dev", premiumUntil: null },
-  });
-  res.json(premiumStats(user));
-}
-
-// GET /api/me/stats — estado premium + limites de super like + planos
+// GET /api/me/stats — estado VIP, limites de Super Like e saldos (boosts/créditos)
 export async function getStats(req: Request, res: Response) {
   const user = await ensureDailyReset(req.userId!);
-  res.json({
-    ...premiumStats(user),
-    plans: Object.entries(PREMIUM_PLANS).map(([id, p]) => ({ id, ...p })),
-  });
+  res.json(premiumStats(user));
 }
 
 const ALLOWED_EXT = ["jpg", "jpeg", "png", "webp", "m4a", "aac", "mp3", "wav", "ogg"];

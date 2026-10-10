@@ -3,6 +3,7 @@ import 'package:flutter_easyloading/flutter_easyloading.dart';
 import 'package:mioamoreapp/helpers/constants.dart';
 import 'package:mioamoreapp/services/analytics_service.dart';
 import 'package:mioamoreapp/services/auth_api.dart';
+import 'package:mioamoreapp/services/push_device_service.dart';
 import 'package:mioamoreapp/services/token_storage.dart';
 import 'package:mioamoreapp/views/app/main_shell.dart';
 import 'package:mioamoreapp/views/app/onboarding_page.dart';
@@ -66,7 +67,8 @@ class _EmailAuthPageState extends State<EmailAuthPage> {
       final result = _isRegister
           ? await AuthApi.register(_email, _password)
           : await AuthApi.login(_email, _password);
-      AnalyticsService.log(_isRegister ? "sign_up" : "login", {"method": "email"});
+      AnalyticsService.log(
+          _isRegister ? "sign_up" : "login", {"method": "email"});
       EasyLoading.dismiss();
       if (!mounted) return;
       goAfterAuth(context, result.hasProfile);
@@ -288,11 +290,22 @@ class LoggedInPage extends StatelessWidget {
                 isWhite: true,
                 borderColor: AppConstants.primaryColor,
                 onPressed: () async {
-                  await TokenStorage.clear();
-                  if (context.mounted) {
-                    Navigator.of(context)
-                        .popUntil((route) => route.isFirst);
+                  final expectedGeneration = TokenStorage.sessionGeneration;
+                  final expectedAccessToken = TokenStorage.accessToken;
+                  final expectedRefreshToken = TokenStorage.refreshToken;
+                  await PushDeviceService.cleanupForLogout();
+                  final cleared = await TokenStorage.clearIfCurrent(
+                    expectedGeneration: expectedGeneration,
+                    expectedAccessToken: expectedAccessToken,
+                    expectedRefreshToken: expectedRefreshToken,
+                  );
+                  if (!context.mounted) return;
+                  if (!cleared && TokenStorage.isLoggedIn) return;
+                  if (TokenStorage.sessionGeneration !=
+                      expectedGeneration + 1) {
+                    return;
                   }
+                  Navigator.of(context).popUntil((route) => route.isFirst);
                 },
                 text: "Sair",
               ),

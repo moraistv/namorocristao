@@ -2,14 +2,17 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_easyloading/flutter_easyloading.dart';
+import 'package:mioamoreapp/services/ads_service.dart';
 import 'package:mioamoreapp/services/app_api.dart';
+import 'package:mioamoreapp/services/public_url.dart';
+import 'package:mioamoreapp/services/push_device_service.dart';
 import 'package:mioamoreapp/services/realtime_bus.dart';
 import 'package:mioamoreapp/services/token_storage.dart';
 import 'package:mioamoreapp/views/app/app_theme.dart';
 import 'package:mioamoreapp/views/app/edit_profile_page.dart';
 import 'package:mioamoreapp/views/app/photo_manager_page.dart';
-import 'package:mioamoreapp/views/app/premium_page.dart';
-import 'package:mioamoreapp/views/app/store_page.dart';
+import 'package:mioamoreapp/views/app/boost_flow.dart';
+import 'package:mioamoreapp/views/app/rewards_page.dart';
 import 'package:mioamoreapp/views/app/settings_page.dart';
 import 'package:mioamoreapp/views/auth/login_page.dart';
 
@@ -22,6 +25,7 @@ class ProfilePage extends StatefulWidget {
 class _ProfilePageState extends State<ProfilePage> {
   Map<String, dynamic>? _profile;
   bool _loading = true;
+  bool _loggingOut = false;
   bool _isPremium = false;
   int _superLikes = 0;
   int _boosts = 0;
@@ -37,6 +41,10 @@ class _ProfilePageState extends State<ProfilePage> {
     _load();
     _loadStats();
     _loadVerse();
+    // A faixa de recompensas depende da config de anúncios (carregada 1x e em cache).
+    unawaited(AdsService.load().then((_) {
+      if (mounted) setState(() {});
+    }));
     RealtimeBus.account.addListener(_onAccountChanged);
   }
 
@@ -102,16 +110,20 @@ class _ProfilePageState extends State<ProfilePage> {
     }
   }
 
-  Future<void> _openPremium() async {
+  Future<void> _openRewards() async {
     await Navigator.push(
-        context, MaterialPageRoute(builder: (_) => const PremiumPage()));
+        context, MaterialPageRoute(builder: (_) => const RewardsPage()));
     _loadStats();
   }
 
-  Future<void> _openStore() async {
-    await Navigator.push(
-        context, MaterialPageRoute(builder: (_) => const StorePage()));
-    _loadStats();
+  /// Com Boost no saldo, o toque ativa; sem saldo, leva às recompensas.
+  Future<void> _onBoostTap() async {
+    if (_boosts <= 0) {
+      await _openRewards();
+      return;
+    }
+    final activated = await activateBoostFlow(context);
+    if (activated) _loadStats();
   }
 
   Future<void> _openSettings() async {
@@ -124,17 +136,50 @@ class _ProfilePageState extends State<ProfilePage> {
   Future<void> _editProfile() async {
     final p = _profile;
     if (p == null) return;
-    final saved = await Navigator.push<bool>(
-        context, MaterialPageRoute(builder: (_) => EditProfilePage(profile: p)));
+    final saved = await Navigator.push<bool>(context,
+        MaterialPageRoute(builder: (_) => EditProfilePage(profile: p)));
     if (saved == true) _load();
   }
 
+  Future<void> _setOfflineForLogout() async {
+    try {
+      await AppApi.setOnline(false).timeout(const Duration(seconds: 2));
+    } catch (error) {
+      debugPrint("Não foi possível encerrar a presença no logout: $error");
+    }
+  }
+
+  Future<void> _cleanupPushForLogout() async {
+    try {
+      await PushDeviceService.cleanupForLogout();
+    } catch (error) {
+      debugPrint("A limpeza remota de push ficou pendente: $error");
+    }
+  }
+
   Future<void> _logout() async {
-    await AppApi.setOnline(false);
-    await TokenStorage.clear();
+    if (_loggingOut) return;
+    final expectedGeneration = TokenStorage.sessionGeneration;
+    final expectedAccessToken = TokenStorage.accessToken;
+    final expectedRefreshToken = TokenStorage.refreshToken;
+    _loggingOut = true;
+    await Future.wait<void>([
+      _setOfflineForLogout(),
+      _cleanupPushForLogout(),
+    ]);
+    final cleared = await TokenStorage.clearIfCurrent(
+      expectedGeneration: expectedGeneration,
+      expectedAccessToken: expectedAccessToken,
+      expectedRefreshToken: expectedRefreshToken,
+    );
     if (!mounted) return;
-    Navigator.pushAndRemoveUntil(context,
-        MaterialPageRoute(builder: (_) => const LoginPage()), (r) => false);
+    if (!cleared && TokenStorage.isLoggedIn) return;
+    if (TokenStorage.sessionGeneration != expectedGeneration + 1) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+      (route) => false,
+    );
   }
 
   Future<void> _managePhotos() async {
@@ -159,6 +204,8 @@ class _ProfilePageState extends State<ProfilePage> {
         "birthday": p["birthday"],
         "city": p["city"],
         "addressText": p["addressText"],
+        if (p["latitude"] is num) "latitude": p["latitude"],
+        if (p["longitude"] is num) "longitude": p["longitude"],
         "denomination": p["denomination"],
         "churchFrequency": p["churchFrequency"],
         "intention": p["intention"],
@@ -210,9 +257,8 @@ class _ProfilePageState extends State<ProfilePage> {
     final interests = (p?["interests"] as List?)?.cast<String>() ?? [];
     final age = _age(p?["birthday"]?.toString());
     final pct = _completion(p, photos);
-    final photo = photos.isNotEmpty
-        ? photos.first
-        : p?["profilePicture"]?.toString();
+    final photo =
+        photos.isNotEmpty ? photos.first : p?["profilePicture"]?.toString();
     final subtitle = (p?["intention"] ?? p?["city"])?.toString();
 
     return SafeArea(
@@ -273,17 +319,24 @@ class _ProfilePageState extends State<ProfilePage> {
               padding: const EdgeInsets.only(top: 4),
               child: Text(subtitle,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(color: Color(0xFF8A91A3), fontSize: 14)),
+                  style:
+                      const TextStyle(color: Color(0xFF8A91A3), fontSize: 14)),
             ),
           const SizedBox(height: 22),
           // Cards rápidos (compactos)
           _quickCards(),
           const SizedBox(height: 18),
-          // VIP em destaque (chama atenção) — só para não-assinantes
-          if (!_isPremium) ...[
-            _getPlusBanner(),
-            const SizedBox(height: 18),
-          ],
+          // Recompensas por anúncio em destaque — some se os anúncios premiados
+          // estiverem desligados no painel e reage a mudanças em tempo real.
+          ValueListenableBuilder<int>(
+            valueListenable: AdsService.revision,
+            builder: (_, __, ___) => AdsService.rewardedAvailable
+                ? Padding(
+                    padding: const EdgeInsets.only(bottom: 18),
+                    child: _rewardsBanner(),
+                  )
+                : const SizedBox.shrink(),
+          ),
           // Verso do dia (rotaciona) — logo abaixo do VIP
           if (_verses.isNotEmpty) ...[
             _verseCard(),
@@ -341,8 +394,8 @@ class _ProfilePageState extends State<ProfilePage> {
   Widget _vipBadge() => Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
-          gradient:
-              const LinearGradient(colors: [Color(0xFFE9C75A), Color(0xFFD4AF37)]),
+          gradient: const LinearGradient(
+              colors: [Color(0xFFE9C75A), Color(0xFFD4AF37)]),
           borderRadius: BorderRadius.circular(10),
         ),
         child: const Row(mainAxisSize: MainAxisSize.min, children: [
@@ -376,8 +429,9 @@ class _ProfilePageState extends State<ProfilePage> {
           CircleAvatar(
             radius: 62,
             backgroundColor: const Color(0xFFE8EAF0),
-            backgroundImage:
-                photo != null ? CachedNetworkImageProvider(photo) : null,
+            backgroundImage: photo != null
+                ? CachedNetworkImageProvider(PublicUrl.media(photo))
+                : null,
             child: photo == null
                 ? const Icon(Icons.person, color: Colors.white, size: 50)
                 : null,
@@ -412,9 +466,11 @@ class _ProfilePageState extends State<ProfilePage> {
   Widget _quickCards() {
     final cards = <Widget>[
       _quickCard(Icons.star_rounded, const Color(0xFF3FA9F5), "$_superLikes",
-          "Super Likes", _openStore),
+          "Super Likes", _openRewards),
+      _quickCard(Icons.bolt_rounded, const Color(0xFF8B5CF6), "$_boosts",
+          "Boosts", _onBoostTap),
       _quickCard(Icons.monetization_on_rounded, const Color(0xFFE0A91B),
-          "$_credits", "Créditos", _openStore),
+          "$_credits", "Créditos", _openRewards),
       if (_isPremium) _vipCard(),
     ];
     return Row(
@@ -428,8 +484,8 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   // Mini-card vertical compacto: ícone + valor + rótulo (cabe 2 ou 3 por linha).
-  Widget _quickCard(
-      IconData icon, Color color, String value, String label, VoidCallback onTap) {
+  Widget _quickCard(IconData icon, Color color, String value, String label,
+      VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -492,50 +548,47 @@ class _ProfilePageState extends State<ProfilePage> {
         label = "Expira em breve";
       }
     }
-    return GestureDetector(
-      onTap: _openPremium,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
-        decoration: BoxDecoration(
-          gradient: const LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [Color(0xFFE9C75A), Color(0xFFD4AF37)]),
-          borderRadius: BorderRadius.circular(14),
-          boxShadow: [
-            BoxShadow(
-                color: AppTheme.gold.withOpacity(0.35),
-                blurRadius: 8,
-                offset: const Offset(0, 3)),
-          ],
-        ),
-        child: Column(
-          children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.28),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: const Icon(Icons.workspace_premium,
-                  color: AppTheme.navy, size: 20),
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [Color(0xFFE9C75A), Color(0xFFD4AF37)]),
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+              color: AppTheme.gold.withOpacity(0.35),
+              blurRadius: 8,
+              offset: const Offset(0, 3)),
+        ],
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.28),
+              borderRadius: BorderRadius.circular(10),
             ),
-            const SizedBox(height: 7),
-            const Text("VIP",
-                style: TextStyle(
-                    color: AppTheme.navy,
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15)),
-            Text(label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    color: AppTheme.navy,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 11)),
-          ],
-        ),
+            child: const Icon(Icons.workspace_premium,
+                color: AppTheme.navy, size: 20),
+          ),
+          const SizedBox(height: 7),
+          const Text("VIP",
+              style: TextStyle(
+                  color: AppTheme.navy,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 15)),
+          Text(label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                  color: AppTheme.navy,
+                  fontWeight: FontWeight.w600,
+                  fontSize: 11)),
+        ],
       ),
     );
   }
@@ -603,9 +656,9 @@ class _ProfilePageState extends State<ProfilePage> {
     );
   }
 
-  Widget _getPlusBanner() {
+  Widget _rewardsBanner() {
     return GestureDetector(
-      onTap: _openPremium,
+      onTap: _openRewards,
       child: Container(
         width: double.infinity,
         padding: const EdgeInsets.all(20),
@@ -615,7 +668,8 @@ class _ProfilePageState extends State<ProfilePage> {
               end: Alignment.bottomRight,
               colors: [AppTheme.navy, Color(0xFF1E2C5A)]),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: AppTheme.gold.withOpacity(0.55), width: 1.4),
+          border:
+              Border.all(color: AppTheme.gold.withOpacity(0.55), width: 1.4),
           boxShadow: [
             BoxShadow(
                 color: AppTheme.gold.withOpacity(0.25),
@@ -636,11 +690,11 @@ class _ProfilePageState extends State<ProfilePage> {
                         colors: [Color(0xFFE9C75A), Color(0xFFD4AF37)]),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(Icons.workspace_premium,
+                  child: const Icon(Icons.play_circle_fill_rounded,
                       color: AppTheme.navy, size: 22),
                 ),
                 const SizedBox(width: 10),
-                const Text("Seja VIP",
+                const Text("Ganhe recompensas",
                     style: TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
@@ -648,10 +702,10 @@ class _ProfilePageState extends State<ProfilePage> {
               ],
             ),
             const SizedBox(height: 12),
-            // Benefícios em destaque
-            _vipPerk(Icons.favorite, "Curtidas ilimitadas"),
-            _vipPerk(Icons.visibility, "Veja quem te curtiu"),
-            _vipPerk(Icons.star_rounded, "Mais Super Likes todo dia"),
+            // O que dá para ganhar assistindo a anúncios
+            _vipPerk(Icons.star_rounded, "Super Likes grátis"),
+            _vipPerk(Icons.bolt_rounded, "Boosts para aparecer mais"),
+            _vipPerk(Icons.card_giftcard, "Créditos para enviar presentes"),
             const SizedBox(height: 16),
             Container(
               width: double.infinity,
@@ -668,7 +722,7 @@ class _ProfilePageState extends State<ProfilePage> {
                       offset: const Offset(0, 3)),
                 ],
               ),
-              child: const Text("Assinar agora",
+              child: const Text("Assistir e ganhar",
                   style: TextStyle(
                       color: AppTheme.navy,
                       fontWeight: FontWeight.bold,
@@ -766,7 +820,8 @@ class _ProfilePageState extends State<ProfilePage> {
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(interestIcon(it), size: 15, color: AppTheme.navy),
+                          Icon(interestIcon(it),
+                              size: 15, color: AppTheme.navy),
                           const SizedBox(width: 6),
                           Text(
                             it,

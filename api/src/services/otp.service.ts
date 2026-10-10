@@ -1,4 +1,5 @@
 import argon2 from "argon2";
+import { randomInt } from "crypto";
 import { prisma } from "../config/prisma";
 import { AppError } from "../lib/errors";
 import { sendLoginCodeEmail } from "../lib/email";
@@ -6,8 +7,8 @@ import { sendLoginCodeEmail } from "../lib/email";
 const CODE_TTL_MINUTES = 10;
 
 function generateCode(): string {
-  // Código numérico de 6 dígitos.
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  // CSPRNG, mantendo o contrato numérico de exatamente 6 dígitos.
+  return randomInt(100_000, 1_000_000).toString();
 }
 
 /** Gera e envia um código de login para o e-mail informado. */
@@ -56,8 +57,16 @@ export async function consumeLoginCode(
     throw new AppError("Código inválido ou expirado", 400);
   }
 
-  await prisma.emailCode.update({
-    where: { id: record.id },
+  // CAS impede que duas verificações concorrentes consumam o mesmo OTP.
+  const consumed = await prisma.emailCode.updateMany({
+    where: {
+      id: record.id,
+      consumedAt: null,
+      expiresAt: { gt: new Date() },
+    },
     data: { consumedAt: new Date() },
   });
+  if (consumed.count !== 1) {
+    throw new AppError("Código inválido ou expirado", 400);
+  }
 }
