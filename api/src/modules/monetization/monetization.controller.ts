@@ -115,9 +115,36 @@ export async function getAds(_req: Request, res: Response) {
   res.json({ ads });
 }
 
+/** Caminho de bloco do Google Ad Manager: /REDE/bloco (com ou sem pastas). */
+const AD_MANAGER_UNIT = /^\/\d+(\/[^\s/]+)+$/;
+
+const AD_UNIT_FIELDS = [
+  ["androidAppOpenId", "App Open"],
+  ["androidBannerId", "Banner"],
+  ["androidInterstitialId", "Intersticial"],
+  ["androidRewardedId", "Premiado"],
+  ["androidRewardedInterstitialId", "Intersticial premiado"],
+  ["androidNativeId", "Nativo"],
+] as const;
+
 // PUT /api/admin/ads
 export async function updateAds(req: Request, res: Response) {
   const data = adSchema.parse(req.body);
+
+  // O app usa as classes do Google Ad Manager: um ID no formato do AdMob
+  // (ca-app-pub-.../...) ou o trecho de código do site não carregaria nada.
+  const invalid = AD_UNIT_FIELDS.filter(([field]) => {
+    const value = data[field];
+    return typeof value === "string" && value !== "" && !AD_MANAGER_UNIT.test(value);
+  }).map(([, label]) => label);
+  if (invalid.length > 0) {
+    throw new AppError(
+      `Use o caminho do bloco do Google Ad Manager, que começa com / (ex.: /23340104016/mypair.app/namoro-android-banner), em: ${invalid.join(", ")}.`,
+      422,
+      { fields: invalid },
+      "INVALID_AD_UNIT"
+    );
+  }
 
   // Lê, decide e grava com a linha travada: o PUT de Recompensas decide com
   // base nos mesmos campos e não pode gravar sobre um retrato desatualizado.

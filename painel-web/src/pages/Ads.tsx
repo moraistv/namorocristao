@@ -49,13 +49,16 @@ const EMPTY: AdSettings = {
   maxAdsPerSession: 0, maxAdsPerDay: 0,
 };
 
+/** Caminho de bloco do Google Ad Manager: /REDE/bloco (com ou sem pastas). */
+const AD_MANAGER_UNIT = /^\/\d+(\/[^\s/]+)+$/;
+
 const FORMATS: { key: keyof AdSettings; idKey: keyof AdSettings; label: string; icon: any; desc: string }[] = [
-  { key: "appOpenEnabled", idKey: "androidAppOpenId", label: "App Open (abertura)", icon: IconAppWindow, desc: "Tela cheia ao abrir/retomar o app" },
+  { key: "appOpenEnabled", idKey: "androidAppOpenId", label: "App Open (abertura)", icon: IconAppWindow, desc: "Tela cheia ao abrir/retomar o app. O app ainda não exibe este formato." },
   { key: "bannerEnabled", idKey: "androidBannerId", label: "Banner", icon: IconLayoutNavbar, desc: "Faixa fixa no topo ou rodapé" },
   { key: "interstitialEnabled", idKey: "androidInterstitialId", label: "Intersticial", icon: IconWindowMaximize, desc: "Tela cheia entre ações" },
-  { key: "rewardedEnabled", idKey: "androidRewardedId", label: "Premiado (rewarded)", icon: IconGift, desc: "Usado nas Recompensas: o usuário assiste e ganha Super Likes, Boosts ou créditos" },
-  { key: "rewardedInterstitialEnabled", idKey: "androidRewardedInterstitialId", label: "Intersticial premiado", icon: IconRectangle, desc: "Intersticial com recompensa opcional" },
-  { key: "nativeEnabled", idKey: "androidNativeId", label: "Nativo (native)", icon: IconArticle, desc: "Anúncio integrado ao layout" },
+  { key: "rewardedEnabled", idKey: "androidRewardedId", label: "Premiado (rewarded)", icon: IconGift, desc: "Usado nas Recompensas: o usuário assiste e ganha Super Likes, Boosts, créditos ou VIP" },
+  { key: "rewardedInterstitialEnabled", idKey: "androidRewardedInterstitialId", label: "Intersticial premiado", icon: IconRectangle, desc: "Intersticial com recompensa opcional. O app ainda não exibe este formato." },
+  { key: "nativeEnabled", idKey: "androidNativeId", label: "Nativo (native)", icon: IconArticle, desc: "Anúncio integrado ao layout. O app ainda não exibe este formato." },
 ];
 
 function Switch({ checked, onChange, label, desc }: { checked: boolean; onChange: (v: boolean) => void; label: string; desc?: string }) {
@@ -90,6 +93,19 @@ export default function Ads() {
   }
 
   async function save() {
+    // O app usa o Google Ad Manager: cada bloco é um caminho /REDE/bloco
+    // (um ID do AdMob ou o código do site não carregariam nada).
+    const invalid = FORMATS.filter((f) => {
+      const value = String(a[f.idKey] ?? "").trim();
+      return value !== "" && !AD_MANAGER_UNIT.test(value);
+    }).map((f) => f.label);
+    if (invalid.length > 0) {
+      setToast({
+        type: "error",
+        text: `Use o caminho do bloco do Google Ad Manager, que começa com / (ex.: /23340104016/mypair.app/namoro-android-banner), em: ${invalid.join(", ")}.`,
+      });
+      return;
+    }
     setSaving(true);
     try {
       await put("/admin/ads", {
@@ -139,7 +155,7 @@ export default function Ads() {
       <div className="d-flex align-items-center justify-content-between mb-3">
         <div>
           <div className="page-pretitle">Monetização</div>
-          <h2 className="page-title"><IconSpeakerphone size={22} className="me-2" />Anúncios (AdMob)</h2>
+          <h2 className="page-title"><IconSpeakerphone size={22} className="me-2" />Anúncios (Google Ad Manager)</h2>
         </div>
         <button className="btn btn-primary" onClick={save} disabled={saving || loading}>
           <IconDeviceFloppy size={16} className="me-1" />{saving ? "Salvando..." : "Salvar tudo"}
@@ -147,7 +163,9 @@ export default function Ads() {
       </div>
 
       <div className="alert alert-info">
-        O <strong>App ID do AdMob</strong> fica fixo no app Android (exigência do SDK). Todo o resto é controlado aqui em tempo real e lido pelo app em <code>/api/config/ads</code>.
+        O <strong>App ID do Google Ad Manager</strong> (<code>ca-app-pub-6101425731822799~7959031353</code>) fica fixo no app Android, como o SDK exige.
+        Os blocos abaixo usam o caminho do Ad Manager (<code>/REDE/pasta/bloco</code>). Todo o resto é controlado aqui em tempo real e lido pelo app
+        em <code>/api/config/ads</code>. Com o Modo teste ligado, o app usa os blocos de demonstração do Google no lugar destes.
       </div>
 
       {loading ? (
@@ -167,7 +185,7 @@ export default function Ads() {
                   </label>
                 </div>
                 <div className="col-md-3">
-                  <Switch checked={a.testMode} onChange={(v) => set("testMode", v)} label="Modo teste" desc="Use IDs de teste" />
+                  <Switch checked={a.testMode} onChange={(v) => set("testMode", v)} label="Modo teste" desc="Usa os blocos de demonstração do Google (sem receita)" />
                 </div>
                 <div className="col-md-5">
                   <label className="form-label">IDs de dispositivos de teste (separados por vírgula)</label>
@@ -213,7 +231,7 @@ export default function Ads() {
                             readOnly={locked}
                             aria-describedby={locked ? lockedId : undefined}
                             onChange={(e) => set(f.idKey, e.target.value as any)}
-                            placeholder={f.idKey === "androidRewardedId" ? "/REDE/bloco (Google Ad Manager)" : "ca-app-pub-XXXXXXXX/XXXXXXXX"}
+                            placeholder="/REDE/pasta/bloco (Google Ad Manager)"
                           />
                           {locked && (
                             <div id={lockedId} className="text-secondary mt-1" style={{ fontSize: 12 }}>

@@ -3,9 +3,10 @@ import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:mioamoreapp/config/config.dart';
 import 'package:mioamoreapp/services/ads_service.dart';
 
-/// Banner do AdMob (usa o ID do painel ou o ID de teste do Google).
-/// Reage em tempo real a `AdsService.revision`: quando o admin muda a config
-/// remota ou o usuário vira VIP, o banner some/aparece sem reabrir o app.
+/// Banner do Google Ad Manager (bloco do painel ou, no Modo teste, o de
+/// demonstração). Reage em tempo real a `AdsService.revision`: quando o admin
+/// muda a config remota ou o usuário vira VIP, o banner some/aparece sem
+/// reabrir o app.
 class AppBannerAd extends StatefulWidget {
   const AppBannerAd({super.key});
 
@@ -14,7 +15,8 @@ class AppBannerAd extends StatefulWidget {
 }
 
 class _AppBannerAdState extends State<AppBannerAd> {
-  BannerAd? _ad;
+  static const _size = AdSize.banner;
+  AdManagerBannerAd? _ad;
   bool _loaded = false;
 
   @override
@@ -31,16 +33,22 @@ class _AppBannerAdState extends State<AppBannerAd> {
   }
 
   void _createAd() {
-    if (!mounted || !AdsService.shouldShowAds || _ad != null) return;
-    final ad = BannerAd(
-      adUnitId: AdsService.bannerId,
-      size: AdSize.banner,
-      request: const AdRequest(),
-      listener: BannerAdListener(
+    final unit = AdsService.bannerUnitId;
+    if (!mounted || !AdsService.shouldShowAds || unit == null || _ad != null) {
+      return;
+    }
+    final ad = AdManagerBannerAd(
+      adUnitId: unit,
+      sizes: const [_size],
+      request: const AdManagerAdRequest(),
+      listener: AdManagerBannerAdListener(
         onAdLoaded: (_) {
           if (mounted) setState(() => _loaded = true);
         },
-        onAdFailedToLoad: (ad, _) => ad.dispose(),
+        onAdFailedToLoad: (ad, _) {
+          ad.dispose();
+          if (identical(_ad, ad)) _ad = null;
+        },
       ),
     );
     ad.load();
@@ -70,7 +78,7 @@ class _AppBannerAdState extends State<AppBannerAd> {
       color: Colors.white,
       alignment: Alignment.center,
       width: double.infinity,
-      height: _ad!.size.height.toDouble(),
+      height: _size.height.toDouble(),
       child: AdWidget(ad: _ad!),
     );
   }
@@ -87,7 +95,8 @@ class ChatInlineAd extends StatefulWidget {
 }
 
 class _ChatInlineAdState extends State<ChatInlineAd> {
-  BannerAd? _ad;
+  static const _size = AdSize.mediumRectangle;
+  AdManagerBannerAd? _ad;
   bool _loaded = false;
 
   @override
@@ -104,16 +113,22 @@ class _ChatInlineAdState extends State<ChatInlineAd> {
   }
 
   void _createAd() {
-    if (!mounted || !AdsService.shouldShowAds || _ad != null) return;
-    final ad = BannerAd(
-      adUnitId: AdsService.bannerId,
-      size: AdSize.mediumRectangle,
-      request: const AdRequest(),
-      listener: BannerAdListener(
+    final unit = AdsService.bannerUnitId;
+    if (!mounted || !AdsService.shouldShowAds || unit == null || _ad != null) {
+      return;
+    }
+    final ad = AdManagerBannerAd(
+      adUnitId: unit,
+      sizes: const [_size],
+      request: const AdManagerAdRequest(),
+      listener: AdManagerBannerAdListener(
         onAdLoaded: (_) {
           if (mounted) setState(() => _loaded = true);
         },
-        onAdFailedToLoad: (ad, _) => ad.dispose(),
+        onAdFailedToLoad: (ad, _) {
+          ad.dispose();
+          if (identical(_ad, ad)) _ad = null;
+        },
       ),
     );
     ad.load();
@@ -162,8 +177,8 @@ class _ChatInlineAdState extends State<ChatInlineAd> {
                     letterSpacing: 0.5)),
           ),
           SizedBox(
-            width: _ad!.size.width.toDouble(),
-            height: _ad!.size.height.toDouble(),
+            width: _size.width.toDouble(),
+            height: _size.height.toDouble(),
             child: AdWidget(ad: _ad!),
           ),
         ],

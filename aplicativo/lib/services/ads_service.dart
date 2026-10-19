@@ -7,24 +7,24 @@ import 'package:mioamoreapp/services/app_api.dart';
 import 'package:mioamoreapp/services/realtime_bus.dart';
 import 'package:mioamoreapp/services/token_storage.dart';
 
-/// IDs de TESTE oficiais do Google (Android) — usados como fallback.
-class TestAdUnits {
-  TestAdUnits._();
-  static const banner = "ca-app-pub-3940256099942544/6300978111";
-  static const interstitial = "ca-app-pub-3940256099942544/1033173712";
-  static const rewardedInterstitial = "ca-app-pub-3940256099942544/5354046379";
-  static const appOpen = "ca-app-pub-3940256099942544/9257395921";
-  static const native = "ca-app-pub-3940256099942544/2247696110";
+/// Blocos de demonstração do Google Ad Manager (Android), usados com o
+/// "Modo teste" do painel ligado. Não pertencem a nenhuma conta, então testar
+/// com eles não gera tráfego inválido.
+class AdManagerDemoUnits {
+  AdManagerDemoUnits._();
+  static const banner = "/21775744923/example/fixed-size-banner";
+  static const interstitial = "/21775744923/example/interstitial";
+  static const rewarded = "/21775744923/example/rewarded";
+  static const rewardedInterstitial =
+      "/21775744923/example/rewarded-interstitial";
+  static const appOpen = "/21775744923/example/app-open";
+  static const native = "/21775744923/example/native";
 }
 
-/// Bloco de demonstração do Google Ad Manager para anúncios premiados.
-/// Usado quando o "Modo teste" do painel está ligado.
-const adManagerDemoRewardedUnit = "/21775744923/example/rewarded";
-
 /// Lê a configuração de anúncios do painel (/config/ads) e mantém em cache.
-/// Banner e intersticial ainda caem no ID de TESTE do Google quando o painel
-/// não envia ID. O premiado (Ad Manager) só usa o bloco de demonstração com o
-/// "Modo teste" ligado.
+/// Todos os blocos são do Google Ad Manager (caminho /REDE/bloco). Com o
+/// "Modo teste" ligado o app usa os blocos de demonstração; desligado, só os
+/// do painel. Formato desligado ou sem bloco não mostra nada.
 class AdsService {
   AdsService._();
 
@@ -115,27 +115,37 @@ class AdsService {
   static String? _interstitialId;
   static String? _rewardedId;
   static String? _appOpenId;
+  static bool _bannerFormatEnabled = false;
+  static bool _interstitialFormatEnabled = false;
   static bool _rewardedFormatEnabled = false;
+  static bool _appOpenFormatEnabled = false;
 
   static bool _interstitialOnOpenChat = false;
   static int _interstitialEverySecs = 120;
 
   static bool _loaded = false;
 
-  static String get bannerId => _bannerId ?? TestAdUnits.banner;
-  static String get interstitialId =>
-      _interstitialId ?? TestAdUnits.interstitial;
-  static String get appOpenId => _appOpenId ?? TestAdUnits.appOpen;
+  /// Bloco a usar para um formato, ou null se ele não deve aparecer. Em modo
+  /// teste usa sempre o bloco de demonstração do Ad Manager; fora dele só vale
+  /// o bloco do painel (nunca cai em anúncio de teste em produção).
+  static String? _unitFor(bool formatEnabled, String? configured, String demo) {
+    if (!enabled || !formatEnabled) return null;
+    if (testMode) return demo;
+    return (configured == null || configured.isEmpty) ? null : configured;
+  }
+
+  static String? get bannerUnitId =>
+      _unitFor(_bannerFormatEnabled, _bannerId, AdManagerDemoUnits.banner);
+  static String? get interstitialUnitId => _unitFor(_interstitialFormatEnabled,
+      _interstitialId, AdManagerDemoUnits.interstitial);
+
+  /// Ainda não exibido pelo app; fica pronto para quando o App Open entrar.
+  static String? get appOpenUnitId =>
+      _unitFor(_appOpenFormatEnabled, _appOpenId, AdManagerDemoUnits.appOpen);
 
   /// Bloco do anúncio premiado (Google Ad Manager), ou null se indisponível.
-  /// Em modo teste usa sempre o bloco de demonstração do Google; fora dele só
-  /// vale o ID configurado no painel (nunca cai em anúncio de teste).
-  static String? get rewardedUnitId {
-    if (!enabled || !_rewardedFormatEnabled) return null;
-    if (testMode) return adManagerDemoRewardedUnit;
-    final id = _rewardedId;
-    return (id == null || id.isEmpty) ? null : id;
-  }
+  static String? get rewardedUnitId => _unitFor(
+      _rewardedFormatEnabled, _rewardedId, AdManagerDemoUnits.rewarded);
 
   /// Anúncios ligados no painel, formato Premiado ativo e bloco disponível.
   /// Vale também para VIP: o anúncio premiado é opcional.
@@ -180,10 +190,15 @@ class AdsService {
       _interstitialId = (units["interstitial"] as String?)?.trim();
       _rewardedId = (units["rewarded"] as String?)?.trim();
       _appOpenId = (units["appOpen"] as String?)?.trim();
+      // Formatos ligados no painel. Servidores antigos não mandam `formats`:
+      // aí vale ter bloco preenchido.
       final formats = cfg["formats"];
-      _rewardedFormatEnabled = formats is Map
-          ? formats["rewarded"] == true
-          : (_rewardedId?.isNotEmpty ?? false);
+      bool formatOn(String key, String? unit) =>
+          formats is Map ? formats[key] == true : (unit?.isNotEmpty ?? false);
+      _bannerFormatEnabled = formatOn("banner", _bannerId);
+      _interstitialFormatEnabled = formatOn("interstitial", _interstitialId);
+      _rewardedFormatEnabled = formatOn("rewarded", _rewardedId);
+      _appOpenFormatEnabled = formatOn("appOpen", _appOpenId);
       final banner = (cfg["banner"] as Map?) ?? {};
       bannerPosition = (banner["position"] as String?) ?? "bottom";
       final inter = (cfg["interstitial"] as Map?) ?? {};

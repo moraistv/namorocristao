@@ -1,8 +1,8 @@
 # Relatório de auditoria e modernização — Namoro Cristão
 
-**Data:** 30/09/2026  
+**Data:** 19/10/2026
 **Escopo:** aplicativo Flutter, painel administrativo React/Vite, API Express/TypeScript, Prisma/PostgreSQL e infraestrutura local de produção.  
-**Estado:** implementação local concluída e revisada; **nenhum deploy, commit ou push foi executado**.
+**Estado:** modernização até a remoção do RevenueCat commitada e enviada à `main`; configuração real do Google Ad Manager concluída localmente, ainda sem commit ou push; nenhum deploy foi executado.
 
 ## 1. Resumo executivo
 
@@ -12,7 +12,7 @@ Os bloqueadores semânticos encontrados durante a revisão — sessão terminal 
 
 O app não vende mais nada: a loja e o paywall foram substituídos por **recompensas por anúncio premiado** (ver 3.8), configuráveis no painel, inclusive horas de VIP com tudo o que antes era pago. O RevenueCat e a permissão de cobrança do Google Play saíram do app. Essa parte passou por quatro rodadas de revisão semântica (as três primeiras com correções; a quarta APPROVED, sem P0, P1 ou P2), e os ajustes feitos depois dela estão listados na seção 6.
 
-O código não deve ser promovido automaticamente à produção: ainda são necessárias configuração de ambiente, aplicação controlada das migrations, backup do banco, configuração dos blocos do Google Ad Manager (incluindo o SSV) e decisões externas sobre armazenamento privado e conformidade de dados de IA.
+Ainda não houve deploy. Antes de produção, continuam necessários a configuração segura do ambiente, backup do banco, aplicação controlada das migrations, confirmação de demanda ativa no Google Ad Manager, configuração e teste real do SSV e decisões externas sobre armazenamento privado e conformidade de dados de IA.
 
 ## 2. Arquitetura atual
 
@@ -134,7 +134,14 @@ O código não deve ser promovido automaticamente à produção: ainda são nece
 - **SSV (verificação do Google):** `GET /api/ads/ssv` (público) valida a assinatura ECDSA/SHA-256 contra as chaves do Google (cache de 6h, renovação em rotação). Como o Google assina callbacks de qualquer conta, o painel guarda o **`ad_unit` esperado**. Um callback só é considerado se a assinatura for válida, trouxer o `custom_data` de um resgate nosso e, quando traz `user_id`, ele for o dono desse resgate; com o `ad_unit` esperado preenchido (obrigatório para exigir o SSV), callbacks de outro bloco são ignorados (não concedem e não viram "último callback"). Só vira "último callback aceito" o que pertence a um resgate nosso e não é resgate vencido nem `transaction_id` repetido; ele (data e `ad_unit`) aparece no painel, com botão "Usar o último" que pede confirmação de que o `ad_unit` é do bloco do admin. Uma URL assinada repetida de um resgate cujo prazo (10 min) já passou não conta como último callback. Callbacks recusados deixam linha no log (no máximo 5 por minuto) e a última recusa (motivo e `ad_unit`) aparece no painel; ela é guardada só em memória, zera ao reiniciar a API e também quando o bloco Premiado ou o `ad_unit` esperado mudam. Com `Exigir confirmação do Google` ligado, só o callback concede; desligado (padrão), o app confirma e o servidor aplica limites e uma espera mínima de 5s. A URL aparece no painel, com botão de copiar.
 - **Ligar a exigência do SSV é protegido pelo servidor** (`409 SSV_NOT_READY` com a lista do que falta): ao ligar, exige Modo teste desligado, anúncios e formato Premiado ligados, ID do bloco salvo e ao menos um callback aceito. Sempre exige `ad_unit` esperado preenchido e, ao ligar ou ao trocá-lo com a exigência já ligada, igual ao `ad_unit` do último callback aceito (evita erro de digitação que faria todo resgate ficar pendente). Com a exigência ligada, `PUT /admin/ads` recusa trocar ou limpar o ID do bloco Premiado (`409 SSV_UNIT_LOCKED`), e a página Anúncios mostra o campo bloqueado. Com a exigência desligada, trocar o ID do bloco Premiado zera o último callback e o `ad_unit` esperado, para a prova ser refeita com o bloco novo (senão seria possível religar a exigência com um `ad_unit` que o bloco novo nunca envia). Esse reset não é à prova de tudo: um callback de resgate iniciado antes da troca e que chegue depois dela pode repor o "último callback" com o `ad_unit` do bloco antigo enquanto o esperado está vazio. Por isso o diálogo de "Usar o último" mostra a hora do callback (que deve ser a do teste do próprio admin) e a exigência só deve ser ligada depois de um teste feito com o bloco novo; fechar isso por completo pediria guardar o instante da troca em uma coluna nova. `PUT /admin/ads` e `PUT /admin/reward-settings` leem, decidem e gravam numa transação com a linha de `ad_settings` travada (`SELECT ... FOR UPDATE`), então não correm um sobre o outro. Com o Modo teste ligado a exigência fica suspensa (o bloco de demonstração nunca chama a URL).
 - **Concorrência:** o início de resgate e o registro de swipes usam transação Serializable. Colisões (`P2034`) são repetidas com espera aleatória (de 25 a 75 ms multiplicados pelo número da tentativa; 5 tentativas no resgate, 4 no swipe). Na revisão semântica, em PostgreSQL descartável, isso eliminou os `409` até 20 pedidos simultâneos; a 40 simultâneos ainda sobraram falhas (até cerca de 10% nos swipes mútuos e, nos inícios de resgate, até cerca de 23% quando o planner escolhe o índice `(status, createdAt)` com a tabela quase toda `GRANTED`). O esgotamento devolve `409 REWARD_CONFLICT`/`SWIPE_CONFLICT`, deixa um aviso no log e o app pode tentar de novo; cada colisão tratada ainda aparece como erro `P2034` no log do Prisma (ruído esperado). Se o tráfego chegar a esse nível, o caminho é serializar por usuário (lock consultivo), mas não é uma troca simples: só é seguro se a concessão (`PENDING→GRANTED`) tomar o mesmo lock, ou se o início reavaliar os limites depois de expirar o resgate anterior. Sem isso, uma concessão concorrente passa entre a leitura dos limites e a criação do novo resgate e o usuário ganha um resgate acima do limite diário; hoje o Serializable fecha essa janela.
-- **Blocos e modo teste:** o bloco do anúncio premiado continua na página **Anúncios**. Com **Modo teste** ligado o app usa o bloco de demonstração do Ad Manager (`/21775744923/example/rewarded`); desligado, só usa o ID salvo. O servidor aplica a mesma regra do app: sem Modo teste e sem ID salvo, as recompensas ficam indisponíveis. Os aparelhos de teste do painel agora são aplicados ao SDK.
+- **Blocos e modo teste:** o Android usa o App ID real `ca-app-pub-6101425731822799~7959031353`. Banner e intersticial passaram para as classes e requisições do Ad Manager; o premiado já usa requisição do Ad Manager. A migration `20260626010000_ad_manager_units` preenche os seis blocos de produção quando o campo está vazio ou ainda contém um ID no formato do AdMob, sem sobrescrever outro caminho válido do Ad Manager e sem alterar o Modo teste nem os formatos ligados. No Premiado, a troca respeita a trava do SSV e limpa a prova antiga quando aplicável:
+  - App Open: `/23340104016/mypair.app/namoro-android-app-open`;
+  - Banner: `/23340104016/mypair.app/namoro-android-banner`;
+  - Intersticial: `/23340104016/mypair.app/namoro-android-interstitial`;
+  - Premiado: `/23340104016/mypair.app/namoro-android-rewarded`;
+  - Intersticial premiado: `/23340104016/mypair.app/namoro-android-rewarded-interstitial`;
+  - Nativo: `/23340104016/mypair.app/namoro-android-native`.
+  Com **Modo teste** ligado, cada formato usa o bloco oficial de demonstração correspondente do Ad Manager, sem receita. Desligado, o app usa somente o caminho salvo no painel; formato desligado ou sem caminho não exibe anúncio e não cai silenciosamente em ID de teste ou do AdMob. Os aparelhos de teste cadastrados no painel continuam aplicados ao SDK. O cache do intersticial é invalidado quando a configuração, o formato ou o estado sem anúncios muda, e callbacks de carregamentos antigos são descartados.
 - **Teto diário:** é **por usuário** e soma todas as recompensas (não existe teto somado de todos os usuários).
 - **Exclusão de ofertas:** só ofertas sem resgates podem ser excluídas (FK `RESTRICT`); as demais são desativadas. Isso preserva o histórico e a base dos limites diários.
 - **Boost utilizável:** a ativação de Boost não tinha tela no app. Foi adicionada (cartão de Boosts no perfil e na tela Recompensas).
@@ -155,6 +162,7 @@ Arquivos:
 - `api/prisma/migrations/20260624010000_ad_rewards/migration.sql`
 - `api/prisma/migrations/20260625010000_vip_reward_kind/migration.sql`
 - `api/prisma/migrations/20260625020000_vip_reward_offer/migration.sql`
+- `api/prisma/migrations/20260626010000_ad_manager_units/migration.sql`
 
 A migration `ai_bot_memory` adiciona, entre outros:
 
@@ -173,7 +181,9 @@ A migration `ad_rewards` cria os enums `RewardKind`/`RewardClaimStatus`, as tabe
 
 A migration `vip_reward_kind` acrescenta o valor `VIP` ao enum `RewardKind` e a coluna `rewardsVipHidesAds` (padrão desligado) em `ad_settings`, e a `vip_reward_offer` semeia a oferta "VIP por 1 hora". Ficam separadas porque um valor novo de enum não pode ser usado na mesma transação em que foi criado.
 
-**As migrations foram aplicadas apenas a um PostgreSQL 16 descartável, local (as 19 em sequência, sem erro e sem drift em relação ao `schema.prisma`). Nenhum banco real foi alterado.** Antes da aplicação em produção:
+A migration `ad_manager_units` garante a linha de configuração e preenche os seis caminhos Android do Google Ad Manager somente em campos vazios ou com IDs antigos no formato `ca-app-pub-.../...`. Caminhos do Ad Manager já configurados são preservados. O bloco Premiado não é alterado enquanto o SSV está exigido; quando pode ser trocado, a prova vinculada ao bloco anterior é zerada.
+
+**As migrations foram aplicadas apenas a um PostgreSQL 16 descartável, local (as 20 em sequência, sem erro e sem drift em relação ao `schema.prisma`). Nenhum banco real foi alterado.** Antes da aplicação em produção:
 
 1. criar backup verificável do PostgreSQL;
 2. testar `prisma migrate deploy` em uma cópia/staging;
@@ -212,8 +222,10 @@ Não preencher segredos em arquivos versionados; usar o ambiente seguro do Dokpl
 | `npm run build` em `painel-web/` | PASS |
 | `dart format` nos Dart alterados | PASS, sem alterações pendentes |
 | `flutter analyze --no-pub` após as correções finais | PASS — `No issues found` |
-| `prisma migrate deploy` das 19 migrations em PostgreSQL 16 descartável | PASS |
+| `prisma migrate deploy` das 20 migrations em PostgreSQL 16 descartável | PASS |
 | `prisma migrate diff` (banco migrado × `schema.prisma`) | PASS — sem diferenças |
+| Migration dos blocos do Ad Manager e rotas reais (`PUT /admin/ads` e `GET /config/ads`): preenchimento dos seis caminhos, preservação de caminho próprio, troca de ID AdMob, trava/limpeza do SSV, recusa de ID AdMob e de snippet, aceitação de caminho válido e aplicação dos formatos | PASS — 15/15 verificações em PostgreSQL descartável (script temporário removido) |
+| Configuração Ad Manager: TypeScript da API e do painel, build Vite, `dart format` e `flutter analyze --no-pub` | PASS — `No issues found` no Flutter |
 | Integração das recompensas em PostgreSQL descartável (limites, espera, teto, SSV, idempotência, concessões e inícios concorrentes, expiração, Boost atômico) | PASS (scripts temporários, removidos depois) |
 | Rotas HTTP novas/removidas, permissões e validações (usuário, admin comum e super-admin; analytics do bot aberto ao admin comum) | PASS (scripts temporários, removidos) |
 | Callbacks SSV assinados com par de chaves local contra a rota real (válido, `ad_unit` de outro bloco, `user_id` divergente, repetição, adulterado) e leitura das chaves reais do Google | PASS |
@@ -242,7 +254,7 @@ Não há suíte first-party de testes automatizados nem scripts de teste na API/
 6. **LGPD/IA:** perfil, fé, histórico e memória podem ser enviados ao provider configurado. Revisar consentimento, base legal, retenção e contrato com o fornecedor.
 7. **Exclusão de conta:** revisar retenção/anonimização de mensagens, logs, memórias e arquivos físicos segundo política jurídica definida.
 8. **Autenticação e abuso:** ainda é recomendável adicionar rate limiting para login/OTP (e, de forma geral, para endpoints autenticados como o início de resgates, que grava uma linha por pedido; linhas não concedidas com mais de 7 dias são apagadas), além de persistência/revogação server-side de refresh tokens.
-9. **Configuração mobile:** termos, privacidade e IDs definitivos do Ad Manager (App ID no `AndroidManifest`, hoje o de teste do Google, e os blocos no painel) precisam ser preenchidos antes da publicação. Banner e intersticial ainda usam as classes do AdMob; só o anúncio premiado já usa Ad Manager.
+9. **Configuração mobile:** o Android já contém o App ID real `ca-app-pub-6101425731822799~7959031353`, e os seis caminhos de produção são preenchidos pela migration e editáveis no painel. Banner, intersticial e premiado usam requisições do Google Ad Manager. App Open, nativo e intersticial premiado ficam salvos, mas o app ainda não exibe esses três formatos. Falta smoke test em aparelho real e confirmar que a conta tem demanda ativa por campanhas, AdSense ou AdX. Termos e privacidade ainda precisam ser revisados; para publicar no iOS também serão necessários App ID e blocos próprios, pois o `Info.plist` continua com placeholder.
 10. **Validação live:** FCM, Socket.IO, DeepSeek e Ad Manager precisam de smoke test em staging com serviços reais (a migration já foi exercitada em PostgreSQL descartável).
 11. **iOS:** não foi compilado nesta máquina Windows.
 12. **APK final:** repetir `flutter build apk --debug --no-pub` em terminal estável, pois a execução final foi cancelada externamente.
@@ -266,7 +278,7 @@ Não há suíte first-party de testes automatizados nem scripts de teste na API/
 - [ ] Confirmar que perfis virtuais são identificados em todos os fluxos.
 - [ ] Validar painel em 320, 375, 768 e 1024 px, além de teclado/axe.
 - [ ] Repetir build APK final e, em macOS, build iOS sem assinatura.
-- [ ] Criar os blocos no Ad Manager, salvar os IDs em Anúncios, desligar o Modo teste e testar uma recompensa de ponta a ponta.
+- [ ] Conferir no painel os seis blocos preenchidos pela migration, garantir demanda ativa no Ad Manager por campanhas, AdSense ou AdX, desligar o Modo teste e testar banner, intersticial e recompensa de ponta a ponta em aparelho real.
 - [ ] Configurar a URL do SSV no bloco Premiado, validar o callback e só então ligar `Exigir confirmação do Google`.
 - [ ] Testar o VIP por anúncio de ponta a ponta: curtidas bloqueadas, anúncio, curtidas liberadas, incógnito e filtros VIP, aviso do incógnito desligado e a opção de esconder os outros anúncios.
 - [ ] Incrementar a versão do app no `pubspec.yaml` (hoje `2.0.3+10`, igual à publicada) antes de enviar a build sem cobrança à loja.
