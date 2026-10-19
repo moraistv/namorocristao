@@ -13,6 +13,7 @@ import 'package:mioamoreapp/services/realtime_bus.dart';
 import 'package:mioamoreapp/services/token_storage.dart';
 import 'package:mioamoreapp/views/app/app_theme.dart';
 import 'package:mioamoreapp/views/app/rewards_page.dart';
+import 'package:mioamoreapp/views/app/vip_offer.dart';
 import 'package:mioamoreapp/views/auth/login_page.dart';
 
 /// Configurações da conta: recompensas, notificações, privacidade, sair e excluir conta.
@@ -45,6 +46,18 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   void initState() {
     super.initState();
     _load();
+    // VIP ganho ou vencido com a tela aberta (ex.: incógnito desligado no fim).
+    RealtimeBus.account.addListener(_onAccountChanged);
+  }
+
+  void _onAccountChanged() {
+    if (mounted) _load();
+  }
+
+  @override
+  void dispose() {
+    RealtimeBus.account.removeListener(_onAccountChanged);
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -52,9 +65,13 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       final stats = await AppApi.getStats();
       final profile = await AppApi.getMyProfile();
       if (!mounted) return;
+      // Estado real: sem VIP, o servidor desliga o incógnito restrito ao VIP.
+      final incognitoActive = stats["incognitoActive"];
       setState(() {
         _isPremium = stats["isPremium"] == true;
-        _incognito = profile?["incognito"] == true;
+        _incognito = incognitoActive is bool
+            ? incognitoActive
+            : profile?["incognito"] == true;
         _notifications = TokenStorage.notificationsEnabled;
       });
     } catch (_) {}
@@ -179,8 +196,15 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     } on AppApiException catch (error) {
       if (!mounted) return;
       setState(() => _incognito = !value);
-      if (error.statusCode == 403) {
-        EasyLoading.showInfo("O modo incógnito é um recurso exclusivo VIP.");
+      if (error.code == "PREMIUM_ONLY" && value) {
+        final vip = await offerVipByAd(
+          context,
+          reason: "O modo incógnito é um recurso VIP.",
+        );
+        if (vip && mounted) {
+          setState(() => _isPremium = true);
+          await _toggleIncognito(true);
+        }
       } else {
         EasyLoading.showError(error.message);
       }

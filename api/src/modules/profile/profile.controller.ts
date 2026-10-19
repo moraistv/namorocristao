@@ -7,7 +7,13 @@ import { AppError } from "../../lib/errors";
 import { isAdult } from "../../lib/age";
 import { UPLOADS_DIR } from "../../config/paths";
 import { upsertProfileSchema, locationSchema } from "./profile.validators";
-import { ensureDailyReset, premiumStats } from "../../lib/premium";
+import { User } from "@prisma/client";
+import {
+  ensureDailyReset,
+  isAdFree,
+  isPremiumActive,
+  premiumStats,
+} from "../../lib/premium";
 
 // GET /api/me/profile
 export async function getMyProfile(req: Request, res: Response) {
@@ -153,7 +159,6 @@ export async function setIncognito(req: Request, res: Response) {
     });
     if (settings.incognitoPremiumOnly) {
       const user = await prisma.user.findUnique({ where: { id: userId } });
-      const { isPremiumActive } = await import("../../lib/premium");
       if (!user || !isPremiumActive(user)) {
         return res.status(403).json({
           error: "O modo incógnito é um recurso VIP.",
@@ -189,10 +194,54 @@ export async function setOnline(req: Request, res: Response) {
   res.json({ isOnline: profile.isOnline });
 }
 
-// GET /api/me/stats — estado VIP, limites de Super Like e saldos (boosts/créditos)
+/**
+ * Estado real do modo incógnito. Com a restrição VIP ligada (padrão), o
+ * incógnito de quem deixou de ser VIP é desligado aqui: a tela mostra o que vale
+ * de fato e ele não volta sozinho no próximo VIP. `disabledNow` avisa o app uma
+ * vez, para a pessoa saber que voltou a aparecer. A descoberta já ignora esse
+ * caso mesmo para quem não abriu o app desde então.
+ */
+async function effectiveIncognito(
+  user: User
+): Promise<{ active: boolean; disabledNow: boolean }> {
+  const profile = await prisma.profile.findUnique({
+    where: { userId: user.id },
+    select: { incognito: true },
+  });
+  if (!profile?.incognito) return { active: false, disabledNow: false };
+  if (isPremiumActive(user)) return { active: true, disabledNow: false };
+  const settings = await prisma.appSettings.findUnique({
+    where: { id: 1 },
+    select: { incognitoPremiumOnly: true },
+  });
+  if (!(settings?.incognitoPremiumOnly ?? true)) {
+    return { active: true, disabledNow: false };
+  }
+  const cleared = await prisma.profile.updateMany({
+    where: { userId: user.id, incognito: true },
+    data: { incognito: false },
+  });
+  return { active: false, disabledNow: cleared.count > 0 };
+}
+
+// GET /api/me/stats — estado VIP, limites de Super Like, saldos, anúncios e incógnito
 export async function getStats(req: Request, res: Response) {
   const user = await ensureDailyReset(req.userId!);
-  res.json(premiumStats(user));
+  const [incognito, ads] = await Promise.all([
+    effectiveIncognito(user),
+    prisma.adSettings.findUnique({
+      where: { id: 1 },
+      select: { rewardsVipHidesAds: true },
+    }),
+  ]);
+  res.json({
+    ...premiumStats(user),
+    // VIP dado pela equipe sempre tira banner e intersticial; o ganho por
+    // anúncio só se o painel ligar "VIP por anúncio esconde os outros anúncios".
+    adFree: isAdFree(user, ads?.rewardsVipHidesAds ?? false),
+    incognitoActive: incognito.active,
+    ...(incognito.disabledNow ? { incognitoDisabled: true } : {}),
+  });
 }
 
 const ALLOWED_EXT = ["jpg", "jpeg", "png", "webp", "m4a", "aac", "mp3", "wav", "ogg"];

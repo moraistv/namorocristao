@@ -109,7 +109,7 @@ export default function Settings() {
             </div>
 
             <div className="card mt-3">
-              <div className="card-header"><h3 className="card-title">Recursos premium</h3></div>
+              <div className="card-header"><h3 className="card-title">Recursos VIP</h3></div>
               <div className="card-body">
                 <Switch
                   label="Super Like com recado"
@@ -119,13 +119,13 @@ export default function Settings() {
                 />
                 <Switch
                   label="Rewind só para VIP"
-                  desc="Desfazer o último swipe é exclusivo de assinantes."
+                  desc="Desfazer o último swipe só para VIP (dado no painel ou ganho por anúncio em Recompensas)."
                   checked={s.rewindPremiumOnly}
                   onChange={(v) => set("rewindPremiumOnly", v)}
                 />
                 <Switch
                   label="Modo incógnito só para VIP"
-                  desc="Navegar invisível é exclusivo de assinantes."
+                  desc="Navegar invisível só para VIP (dado no painel ou ganho por anúncio). Quando o VIP acaba, a pessoa volta a aparecer."
                   checked={s.incognitoPremiumOnly}
                   onChange={(v) => set("incognitoPremiumOnly", v)}
                 />

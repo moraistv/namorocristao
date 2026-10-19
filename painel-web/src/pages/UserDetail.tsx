@@ -3,7 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import {
   IconArrowLeft, IconHeart, IconStar, IconThumbDown, IconMessage, IconFlag,
   IconBan, IconShieldLock, IconDeviceMobile, IconPhoto, IconLock,
-  IconMapPin, IconCalendar, IconMail, IconCreditCard, IconWorld,
+  IconMapPin, IconCalendar, IconMail, IconWorld,
   IconUserCheck, IconClock, IconClockPause, IconCrown, IconBolt,
   IconRosetteDiscountCheck, IconCoin,
 } from "@tabler/icons-react";
@@ -128,7 +128,7 @@ export default function UserDetail() {
   function revokeVip() {
     setDialog({
       title: "Remover VIP",
-      message: "Remove o premium do usuário imediatamente. Confirma?",
+      message: "Remove o VIP do usuário imediatamente, inclusive as horas ganhas por anúncio. Confirma?",
       icon: IconCrown,
       danger: true,
       confirmText: "Remover VIP",
@@ -271,11 +271,11 @@ export default function UserDetail() {
           </div>
 
           <div className="card mb-3">
-            <div className="card-header"><h3 className="card-title"><IconCreditCard size={18} className="me-2" />VIP e saldos</h3></div>
+            <div className="card-header"><h3 className="card-title"><IconCrown size={18} className="me-2" />VIP e saldos</h3></div>
             <div className="card-body py-2">
-              <Row label="Premium" value={bill.isPremium ? "Sim" : "Não"} />
-              <Row label="Plano concedido" value={bill.plan ?? "—"} />
-              <Row label="Premium até" value={dia(bill.premiumUntil)} />
+              <Row label="VIP ativo" value={bill.isPremium ? "Sim" : "Não"} />
+              <Row label="Origem do VIP" value={bill.plan ?? "—"} />
+              <Row label="VIP até" value={dt(bill.premiumUntil)} />
               <Row label="Super likes usados hoje" value={u.superLikesUsedToday} />
               <Row label="Super likes bônus" value={<strong>{u.bonusSuperLikes ?? 0}</strong>} />
               <Row label="Boosts restantes" value={u.boostsRemaining} />

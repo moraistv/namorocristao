@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 import 'package:mioamoreapp/config/api_config.dart';
+import 'package:mioamoreapp/services/realtime_bus.dart';
 import 'package:mioamoreapp/services/token_storage.dart';
 
 enum AppApiErrorType {
@@ -648,9 +649,14 @@ class AppApi {
     return _optionalMap(json, "user");
   }
 
-  /// Estado VIP, limites de Super Like e saldos (Super Likes extras, Boosts, créditos).
-  static Future<Map<String, dynamic>> getStats() =>
-      _request("GET", "/me/stats");
+  /// Estado VIP, limites de Super Like, saldos (Super Likes extras, Boosts,
+  /// créditos), se o usuário está sem anúncios e o estado real do incógnito.
+  static Future<Map<String, dynamic>> getStats() async {
+    final stats = await _request("GET", "/me/stats");
+    // O servidor desligou o incógnito agora (o VIP acabou): o app avisa.
+    if (stats["incognitoDisabled"] == true) RealtimeBus.incognitoTurnedOff();
+    return stats;
+  }
 
   // ── Recompensas por anúncio premiado ──
   /// Ofertas ativas + uso do dia (limites, espera e disponibilidade).

@@ -7,6 +7,7 @@ import {
   FREE_SUPERLIKES_PER_DAY,
   PREMIUM_SUPERLIKES_PER_DAY,
   isPremiumActive,
+  premiumInactiveWhere,
   startOfToday,
 } from "../../lib/premium";
 import { isRecentlyOnline } from "../../lib/presence";
@@ -117,6 +118,19 @@ export async function getDiscovery(userId: string, filters: DiscoveryFilters) {
   banned.forEach((record) => excluded.add(record.userId));
 
   const now = new Date();
+  const [settings, viewer] = await Promise.all([
+    prisma.appSettings.findUnique({
+      where: { id: 1 },
+      select: { incognitoPremiumOnly: true },
+    }),
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { isPremium: true, premiumUntil: true },
+    }),
+  ]);
+  // Com o incógnito restrito ao VIP (padrão), ele só esconde quem ainda é VIP:
+  // quando o VIP (do painel ou por anúncio) acaba, a pessoa volta a aparecer.
+  const incognitoPremiumOnly = settings?.incognitoPremiumOnly ?? true;
   const where: Prisma.ProfileWhereInput = {
     userId: { notIn: Array.from(excluded) },
     user: {
@@ -124,7 +138,9 @@ export async function getDiscovery(userId: string, filters: DiscoveryFilters) {
       deletedAt: null,
       OR: [{ suspendedUntil: null }, { suspendedUntil: { lte: now } }],
     },
-    incognito: false,
+    OR: incognitoPremiumOnly
+      ? [{ incognito: false }, { user: premiumInactiveWhere(now) }]
+      : [{ incognito: false }],
     ...(filters.gender ? { gender: filters.gender } : {}),
   };
 
@@ -201,11 +217,35 @@ export async function getDiscovery(userId: string, filters: DiscoveryFilters) {
     (card) => !superLikers.has(card.id) && !boostedIds.has(card.id)
   );
 
-  return {
-    needsProfile: false,
-    candidates: [...superCards, ...boostCards, ...rest].slice(0, 30),
-    now,
-  };
+  // Quem deu Super Like sempre entra entre os candidatos. Na frente do baralho
+  // (e dos Top Picks) só para quem é VIP: para os outros a posição revelaria
+  // quem curtiu, que é recurso VIP. Aí vão embaralhados com os demais.
+  const viewerIsVip = viewer ? isPremiumActive(viewer) : false;
+  let candidates: typeof cards;
+  if (viewerIsVip) {
+    candidates = [...superCards, ...boostCards, ...rest].slice(0, LIMIT);
+  } else {
+    const superKeep = superCards.slice(0, LIMIT);
+    const boostKeep = boostCards.slice(0, LIMIT - superKeep.length);
+    const room = LIMIT - superKeep.length - boostKeep.length;
+    const mixed = shuffled([...superKeep, ...rest.slice(0, room)]);
+    candidates = [...boostKeep, ...mixed];
+  }
+
+  return { needsProfile: false, candidates, now };
+}
+
+/** Quantos candidatos a descoberta devolve por vez. */
+const LIMIT = 30;
+
+/** Cópia embaralhada (Fisher-Yates). */
+function shuffled<T>(items: T[]): T[] {
+  const copy = [...items];
+  for (let index = copy.length - 1; index > 0; index--) {
+    const randomIndex = Math.floor(Math.random() * (index + 1));
+    [copy[index], copy[randomIndex]] = [copy[randomIndex], copy[index]];
+  }
+  return copy;
 }
 
 /** Retorna os "Top Picks": melhores candidatos por compatibilidade. */

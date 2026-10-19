@@ -7,6 +7,7 @@ import {
 import { createHash, randomUUID } from "crypto";
 import { prisma } from "../../config/prisma";
 import { AppError } from "../../lib/errors";
+import { premiumInactiveWhere } from "../../lib/premium";
 import { onlineCutoff } from "../../lib/presence";
 import { pushOnly } from "../../lib/push";
 import { emitToUser } from "../../sockets";
@@ -101,9 +102,10 @@ function audienceFilter(
   audience: BroadcastAudience,
   now: Date
 ): Prisma.UserWhereInput | undefined {
-  const premium = premiumAudience(now);
-  if (audience === "premium") return premium;
-  if (audience === "free") return { NOT: premium };
+  if (audience === "premium") return premiumAudience(now);
+  // Complemento explícito: `NOT premiumAudience` perderia quem nunca foi VIP
+  // (premiumUntil nulo vira NULL no SQL e a linha some).
+  if (audience === "free") return premiumInactiveWhere(now);
   return undefined;
 }
 

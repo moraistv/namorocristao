@@ -178,7 +178,8 @@ export async function ssvCallback(req: Request, res: Response) {
 // ───────────────────────── Painel (super-admin) ─────────────────────────
 
 const rewardSchema = z.object({
-  kind: z.enum(["SUPERLIKES", "BOOSTS", "CREDITS"]),
+  // VIP: amount = horas de VIP por anúncio.
+  kind: z.enum(["SUPERLIKES", "BOOSTS", "CREDITS", "VIP"]),
   title: z.string().trim().min(1).max(80),
   description: z.string().trim().max(200).optional().nullable(),
   amount: z.number().int().min(1).max(100),
@@ -192,6 +193,8 @@ const settingsSchema = z.object({
   rewardsRequireSsv: z.boolean(),
   rewardsMaxPerDay: z.number().int().min(0).max(1000),
   rewardsSsvAdUnit: z.string().trim().max(120).optional().nullable(),
+  // Ausente = mantém (painéis antigos não enviam).
+  rewardsVipHidesAds: z.boolean().optional(),
 });
 
 function notifyStoreChanged() {
@@ -211,11 +214,13 @@ function settingsView(ads: {
   rewardsSsvAdUnit: string | null;
   rewardsSsvLastAt: Date | null;
   rewardsSsvLastAdUnit: string | null;
+  rewardsVipHidesAds: boolean;
 }) {
   return {
     rewardsRequireSsv: ads.rewardsRequireSsv,
     rewardsMaxPerDay: ads.rewardsMaxPerDay,
     rewardsSsvAdUnit: ads.rewardsSsvAdUnit,
+    rewardsVipHidesAds: ads.rewardsVipHidesAds,
     ssvLastAt: ads.rewardsSsvLastAt,
     ssvLastAdUnit: ads.rewardsSsvLastAdUnit,
     // Só em memória: vale desde o último reinício da API.
@@ -302,7 +307,7 @@ export async function updateRewardSettings(req: Request, res: Response) {
 
   // Lê, decide e grava com a linha travada: o PUT de Anúncios decide com base
   // nos mesmos campos (bloco Premiado) e não pode correr junto com este.
-  const { ads, expectedChanged } = await prisma.$transaction(async (tx) => {
+  const { ads, expectedChanged, hidesAdsChanged } = await prisma.$transaction(async (tx) => {
     const current = await lockAdSettings(tx);
 
     const adUnit =
@@ -358,14 +363,20 @@ export async function updateRewardSettings(req: Request, res: Response) {
         rewardsRequireSsv: input.rewardsRequireSsv,
         rewardsMaxPerDay: input.rewardsMaxPerDay,
         rewardsSsvAdUnit: adUnit,
+        ...(input.rewardsVipHidesAds === undefined
+          ? {}
+          : { rewardsVipHidesAds: input.rewardsVipHidesAds }),
       },
     });
     return {
       ads: saved,
       expectedChanged: adUnit !== current.rewardsSsvAdUnit,
+      hidesAdsChanged: saved.rewardsVipHidesAds !== current.rewardsVipHidesAds,
     };
   });
   // Trocar o ad_unit esperado muda o que conta como recusa: a anterior já não vale.
   if (expectedChanged) clearSsvRejection();
+  // Quem está com VIP por anúncio passa a ver (ou não) os outros anúncios na hora.
+  if (hidesAdsChanged) emitToAll("config:ads", { changed: true });
   res.json({ settings: settingsView(ads) });
 }

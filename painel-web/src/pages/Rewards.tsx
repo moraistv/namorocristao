@@ -1,7 +1,7 @@
 import { FormEvent, useCallback, useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  IconAlertTriangle, IconAward, IconBolt, IconCheck, IconCoin, IconCopy,
+  IconAlertTriangle, IconAward, IconBolt, IconCheck, IconCoin, IconCopy, IconCrown,
   IconDeviceFloppy, IconInfoCircle, IconPencil, IconPlus, IconRefresh,
   IconSpeakerphone, IconStar, IconTrash,
 } from "@tabler/icons-react";
@@ -9,7 +9,7 @@ import { API_BASE, del, get, post, put } from "../api";
 import { Dialog, DialogConfig, Toast, ToastMsg } from "../components/ui";
 import { useModalAccessibility } from "../components/useModalAccessibility";
 
-type Kind = "SUPERLIKES" | "BOOSTS" | "CREDITS";
+type Kind = "SUPERLIKES" | "BOOSTS" | "CREDITS" | "VIP";
 
 interface Reward {
   id: string;
@@ -28,6 +28,8 @@ interface Overview {
   settings: {
     rewardsRequireSsv: boolean;
     rewardsMaxPerDay: number;
+    /** VIP ganho por anúncio também esconde banner e intersticial. */
+    rewardsVipHidesAds: boolean;
     rewardsSsvAdUnit: string | null;
     ssvLastAt: string | null;
     ssvLastAdUnit: string | null;
@@ -43,12 +45,14 @@ interface Overview {
   };
 }
 
-const KINDS: Kind[] = ["SUPERLIKES", "BOOSTS", "CREDITS"];
+const KINDS: Kind[] = ["VIP", "SUPERLIKES", "BOOSTS", "CREDITS"];
 
 const KIND_META: Record<Kind, { label: string; unit: string; icon: typeof IconStar; color: string; bg: string }> = {
   SUPERLIKES: { label: "Super Likes", unit: "Super Like(s)", icon: IconStar, color: "#4263eb", bg: "rgba(66,99,235,.15)" },
   BOOSTS: { label: "Boosts", unit: "Boost(s)", icon: IconBolt, color: "#ae3ec9", bg: "rgba(174,62,201,.15)" },
   CREDITS: { label: "Créditos (presentes)", unit: "crédito(s)", icon: IconCoin, color: "#2fb344", bg: "rgba(47,179,68,.15)" },
+  // A quantidade é em horas: ver quem curtiu, filtros VIP, incógnito, Rewind e sem anúncios.
+  VIP: { label: "VIP por tempo", unit: "hora(s) de VIP", icon: IconCrown, color: "#b8860b", bg: "rgba(212,175,55,.18)" },
 };
 
 /** Converte o texto de um campo numérico; vazio ou não inteiro vira NaN (inválido). */
@@ -166,7 +170,7 @@ function RewardModal({ reward, onClose, onSaved }: {
               </div>
               <div className="row g-2 mb-3">
                 <div className="col-12 col-sm-4">
-                  <label className="form-label" htmlFor="reward-amount">Ganha por anúncio</label>
+                  <label className="form-label" htmlFor="reward-amount">{kind === "VIP" ? "Horas de VIP por anúncio" : "Ganha por anúncio"}</label>
                   <input id="reward-amount" className="form-control" type="number" min={1} max={100} value={amount} onChange={(e) => setAmount(e.target.value)} />
                 </div>
                 <div className="col-12 col-sm-4">
@@ -180,6 +184,11 @@ function RewardModal({ reward, onClose, onSaved }: {
               </div>
               <div className="text-secondary mb-3" style={{ fontSize: 12 }}>
                 Limites valem por usuário. Anúncios por dia: 0 = sem limite. Espera: tempo mínimo entre dois anúncios desta recompensa.
+                {kind === "VIP" && (
+                  <> O VIP libera ver quem curtiu, os filtros VIP, o modo incógnito, o Rewind e 5 Super Likes por dia enquanto
+                    durar. As horas somam ao VIP que a pessoa já tiver. Se os outros anúncios somem durante o VIP é definido em
+                    Segurança e limites.</>
+                )}
               </div>
               <div className="row g-2 align-items-end">
                 <div className="col-6">
@@ -239,12 +248,13 @@ export default function Rewards() {
 
   const [requireSsv, setRequireSsv] = useState(false);
   const [maxPerDay, setMaxPerDay] = useState("0");
+  const [vipHidesAds, setVipHidesAds] = useState(false);
   const [ssvAdUnit, setSsvAdUnit] = useState("");
   const [savingSettings, setSavingSettings] = useState(false);
   const [copied, setCopied] = useState(false);
   const requestRef = useRef(0);
   /** Últimos valores dos campos de segurança vindos do servidor (base para saber o que o admin editou). */
-  const syncedRef = useRef<{ requireSsv: boolean; maxPerDay: string; ssvAdUnit: string } | null>(null);
+  const syncedRef = useRef<{ requireSsv: boolean; maxPerDay: string; ssvAdUnit: string; vipHidesAds: boolean } | null>(null);
 
   const ssvUrl = `${API_BASE}/ads/ssv`;
 
@@ -264,13 +274,16 @@ export default function Rewards() {
         requireSsv: overview.settings.rewardsRequireSsv,
         maxPerDay: String(overview.settings.rewardsMaxPerDay),
         ssvAdUnit: overview.settings.rewardsSsvAdUnit ?? "",
+        vipHidesAds: overview.settings.rewardsVipHidesAds === true,
       };
       const previous = syncedRef.current;
       if (syncSettings || previous === null) {
         setRequireSsv(next.requireSsv);
         setMaxPerDay(next.maxPerDay);
         setSsvAdUnit(next.ssvAdUnit);
+        setVipHidesAds(next.vipHidesAds);
       } else {
+        setVipHidesAds((current) => (current === previous.vipHidesAds ? next.vipHidesAds : current));
         // Só troca o que o admin não editou desde a última sincronização, para um
         // formulário antigo não regravar valores que mudaram no servidor (ex.: o
         // ad_unit esperado zerado pela troca do bloco Premiado).
@@ -328,6 +341,7 @@ export default function Rewards() {
         rewardsRequireSsv: requireSsv,
         rewardsMaxPerDay: cap,
         rewardsSsvAdUnit: ssvAdUnit.trim() || null,
+        rewardsVipHidesAds: vipHidesAds,
       });
       setToast({ type: "success", text: "Configuração salva" });
       await load(true);
@@ -375,6 +389,7 @@ export default function Rewards() {
     data !== null &&
     (requireSsv !== savedSsv ||
       maxPerDay !== String(data.settings.rewardsMaxPerDay) ||
+      vipHidesAds !== (data.settings.rewardsVipHidesAds === true) ||
       adUnitText !== savedAdUnit);
 
   // O que falta para salvar com a exigência ligada. O servidor confere as mesmas
@@ -585,6 +600,22 @@ export default function Rewards() {
                   <input id="rewards-max-day" className="form-control" style={{ maxWidth: 200 }} type="number" min={0} max={1000} value={maxPerDay} onChange={(e) => setMaxPerDay(e.target.value)} />
                   <div className="text-secondary mt-1" style={{ fontSize: 12 }}>
                     Soma de todas as recompensas. 0 = sem teto (valem só os limites de cada recompensa).
+                  </div>
+
+                  <label className="form-check form-switch mt-4">
+                    <input
+                      type="checkbox"
+                      className="form-check-input"
+                      checked={vipHidesAds}
+                      aria-describedby="rewards-vip-ads-help"
+                      onChange={(e) => setVipHidesAds(e.target.checked)}
+                    />
+                    <span className="form-check-label fw-medium">VIP ganho por anúncio também esconde banner e intersticial</span>
+                  </label>
+                  <div id="rewards-vip-ads-help" className="text-secondary mt-1" style={{ fontSize: 12 }}>
+                    Desligado (padrão): durante o VIP por anúncio a pessoa ganha os recursos VIP, mas continua vendo os outros
+                    anúncios. Ligado: fica sem banner e intersticial enquanto o VIP durar (menos impressões). O VIP dado pela
+                    equipe sempre fica sem esses anúncios.
                   </div>
 
                   <label className="form-check form-switch mt-4">

@@ -249,26 +249,6 @@ class IOSAdUnits {
   static const String rewardedVideoId = "admob_ios_rewarded_video_id";
 }
 
-///
-/// Subscription Settings
-///!! You need to create a subscription plan in your app store and play store then create the api keys in revenue cat and paste them here.
-
-class SubscriptionConstants {
-  SubscriptionConstants._();
-
-  // Revenue Cat Apple API Key
-  static const String appleApiKey =
-      ""; //!! Create this from revenue cat and paste here
-
-  // Revenue Cat Google API Key
-  static const String googleApiKey =
-      ""; //!! Create this from revenue cat and paste here
-
-  // Revenue Cat Entitlement Id
-  static const String entitlementId =
-      ""; //!! Create the entitlement id in revenue cat and paste here
-}
-
 // Free and Premium User Limitations
 class FreemiumLimitation {
   FreemiumLimitation._();

@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:mioamoreapp/providers/account_delete_request_provider.dart';
 import 'package:mioamoreapp/providers/device_token_provider.dart';
-import 'package:purchases_flutter/purchases_flutter.dart';
 
 final authStateProvider = StreamProvider<User?>((ref) {
   return FirebaseAuth.instance.authStateChanges().map((user) {
@@ -87,7 +86,6 @@ class AuthProvider {
   }
 
   Future<void> signOut() async {
-    Purchases.logOut();
     await _deviceTokenProvider.deleteDeviceToken();
     await GoogleSignIn().signOut();
     await FirebaseAuth.instance.signOut();

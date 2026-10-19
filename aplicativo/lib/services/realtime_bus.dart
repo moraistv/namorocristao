@@ -21,4 +21,9 @@ class RealtimeBus {
   /// Incrementa quando o catálogo muda no painel (recompensas por anúncio e presentes).
   static final ValueNotifier<int> store = ValueNotifier<int>(0);
   static void storeChanged() => store.value++;
+
+  /// Incrementa quando o servidor desliga o modo incógnito porque o VIP acabou.
+  /// O shell avisa a pessoa de que ela voltou a aparecer na descoberta.
+  static final ValueNotifier<int> incognitoOff = ValueNotifier<int>(0);
+  static void incognitoTurnedOff() => incognitoOff.value++;
 }

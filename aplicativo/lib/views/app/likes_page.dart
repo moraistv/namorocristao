@@ -13,6 +13,7 @@ import 'package:mioamoreapp/views/app/chat_page.dart';
 import 'package:mioamoreapp/views/app/match_celebration.dart';
 import 'package:mioamoreapp/views/app/profile_detail_view.dart';
 import 'package:mioamoreapp/views/app/rewards_page.dart';
+import 'package:mioamoreapp/views/app/vip_offer.dart';
 
 class LikesPage extends StatefulWidget {
   const LikesPage({super.key});
@@ -86,24 +87,46 @@ class _LikesPageState extends State<LikesPage> {
     }
   }
 
-  /// Ver quem curtiu é exclusivo VIP (concedido pela equipe); não há compra.
-  Future<void> _showVipOnlyInfo() async {
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: Row(children: [
+  /// Ver quem curtiu é VIP (dado pela equipe ou ganho por anúncio). Sem VIP o
+  /// servidor nem envia quem foi; aqui só oferecemos o VIP por anúncio.
+  Future<void> _unlockLikes() async {
+    final vip = await offerVipByAd(
+      context,
+      reason: "Ver quem te curtiu é um recurso VIP.",
+    );
+    if (vip && mounted) unawaited(_load());
+  }
+
+  Widget _unlockBanner() {
+    final count = _likedYou.length;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppTheme.gold.withOpacity(0.14),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.gold.withOpacity(0.4)),
+      ),
+      child: Row(
+        children: [
           Icon(Icons.workspace_premium, color: AppTheme.gold),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              count == 1
+                  ? "1 pessoa já te curtiu. Fique VIP para ver quem foi."
+                  : "$count pessoas já te curtiram. Fique VIP para ver quem foram.",
+              style: const TextStyle(
+                color: AppTheme.navy,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
           const SizedBox(width: 8),
-          const Text("Recurso VIP"),
-        ]),
-        content: const Text(
-          "Ver quem já te curtiu é um recurso exclusivo para usuários VIP.",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text("Entendi"),
+          ElevatedButton(
+            style: AppTheme.primaryButton,
+            onPressed: () => unawaited(_unlockLikes()),
+            child: const Text("Ver"),
           ),
         ],
       ),
@@ -200,8 +223,10 @@ class _LikesPageState extends State<LikesPage> {
             _sectionTitle("Quem te curtiu (${_likedYou.length})"),
             if (_likedYou.isEmpty)
               _emptyText("Ninguém te curtiu ainda. Continue descobrindo!")
-            else
+            else ...[
+              if (!_premium) _unlockBanner(),
               _grid(_likedYou, locked: !_premium),
+            ],
             const SizedBox(height: 24),
             _sectionTitle("Seus matches (${_matches.length})"),
             if (_matches.isEmpty)
@@ -367,9 +392,9 @@ class _LikesPageState extends State<LikesPage> {
     if (type == "SUPERLIKE") {
       try {
         final stats = await AppApi.getStats();
-        final premium = stats["isPremium"] == true;
+        // VIP também tem limite diário (maior); o saldo já inclui os extras.
         final remaining = (stats["superLikesLeft"] as num?)?.toInt() ?? 0;
-        if (!premium && remaining <= 0) {
+        if (remaining <= 0) {
           if (mounted) await _openRewardsForSuperLikes();
           return;
         }
@@ -507,7 +532,7 @@ class _LikesPageState extends State<LikesPage> {
     return GestureDetector(
       onTap: () {
         if (locked) {
-          unawaited(_showVipOnlyInfo());
+          unawaited(_unlockLikes());
         } else if (matchId != null) {
           unawaited(
             Navigator.push(

@@ -127,10 +127,15 @@ export async function likes(req: Request, res: Response) {
       !outgoingIds.has(interaction.fromUserId) &&
       !matchedIds.has(interaction.fromUserId)
   );
+  // Ver quem te curtiu é VIP (pelo painel ou por anúncio). A trava fica aqui:
+  // sem VIP a resposta não leva nada que identifique quem curtiu.
+  const canSeeLikes = user ? isPremiumActive(user) : false;
   const profileIds = Array.from(
     new Set([
       ...matchedIds,
-      ...pending.map((interaction) => interaction.fromUserId),
+      ...(canSeeLikes
+        ? pending.map((interaction) => interaction.fromUserId)
+        : []),
     ])
   );
   const profiles = profileIds.length
@@ -154,23 +159,32 @@ export async function likes(req: Request, res: Response) {
       matchId: match.id,
     };
   });
-  const likedYou = pending
-    .map((interaction) => ({
-      ...cardFromProfile(
-        profileById.get(interaction.fromUserId),
-        interaction.fromUserId,
-        me
-      ),
-      superLike: interaction.type === "SUPERLIKE",
-      note: interaction.note ?? null,
-    }))
-    .sort(
-      (first, second) =>
-        Number(second.superLike) - Number(first.superLike)
-    );
+  const bySuperLikeFirst = (
+    first: { superLike: boolean },
+    second: { superLike: boolean }
+  ) => Number(second.superLike) - Number(first.superLike);
+  const likedYou = canSeeLikes
+    ? pending
+        .map((interaction) => ({
+          ...cardFromProfile(
+            profileById.get(interaction.fromUserId),
+            interaction.fromUserId,
+            me
+          ),
+          superLike: interaction.type === "SUPERLIKE",
+          note: interaction.note ?? null,
+        }))
+        .sort(bySuperLikeFirst)
+    : pending
+        .map((interaction) => ({
+          locked: true as const,
+          superLike: interaction.type === "SUPERLIKE",
+        }))
+        .sort(bySuperLikeFirst);
 
   res.json({
-    isPremium: user ? isPremiumActive(user) : false,
+    isPremium: canSeeLikes,
+    likedYouLocked: !canSeeLikes,
     matches: matchCards,
     likedYou,
     likedYouCount: likedYou.length,

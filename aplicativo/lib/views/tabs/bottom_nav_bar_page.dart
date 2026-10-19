@@ -6,7 +6,6 @@ import 'package:mioamoreapp/helpers/constants.dart';
 import 'package:mioamoreapp/models/user_profile_model.dart';
 import 'package:mioamoreapp/providers/banned_users_provider.dart';
 import 'package:mioamoreapp/providers/match_provider.dart';
-import 'package:mioamoreapp/providers/subscriptions/init_purchase_conf.dart';
 import 'package:mioamoreapp/providers/user_profile_provider.dart';
 import 'package:mioamoreapp/views/others/error_page.dart';
 import 'package:mioamoreapp/views/others/loading_page.dart';
@@ -33,7 +32,6 @@ class _BottomNavBarPageState extends ConsumerState<BottomNavBarPage>
   @override
   void initState() {
     WidgetsBinding.instance.addObserver(this);
-    initPlatformStateForPurchases(widget.userId);
     super.initState();
   }
 

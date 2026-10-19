@@ -6,7 +6,13 @@ import { AppError } from "../../lib/errors";
 import { hashPassword } from "../../lib/password";
 import { assertPermission, assertSuperAdmin } from "../../lib/adminPermission";
 import { ageFromBirthday } from "../../lib/age";
-import { PREMIUM_PLANS, isPremiumPlanId } from "../../lib/premium";
+import {
+  PREMIUM_PLANS,
+  isPremiumActive,
+  isPremiumPlanId,
+  premiumActiveWhere,
+  premiumInactiveWhere,
+} from "../../lib/premium";
 import { isRecentlyOnline, onlineCutoff } from "../../lib/presence";
 import { notifyUsers } from "../../lib/push";
 import { disconnectUser, emitToUser } from "../../sockets";
@@ -449,11 +455,15 @@ export async function userDetail(req: Request, res: Response) {
     take: 15,
   });
 
-  // VIP é concedido pelo painel; o rótulo vem da duração escolhida.
+  // VIP vem do painel (rótulo da duração escolhida) ou de anúncio premiado ("ad").
   const planLabel =
-    user.premiumPlan && isPremiumPlanId(user.premiumPlan)
-      ? PREMIUM_PLANS[user.premiumPlan].label
-      : null;
+    user.premiumPlan === "ad"
+      ? "Por anúncio"
+      : user.premiumPlan && isPremiumPlanId(user.premiumPlan)
+        ? PREMIUM_PLANS[user.premiumPlan].label
+        : null;
+  // A flag sozinha fica ligada depois que a validade passa.
+  const premiumActive = isPremiumActive(user);
 
   const photos = user.profile?.mediaFiles?.length ?? 0;
   const lockedPhotos = user.profile?.lockedPhotos?.length ?? 0;
@@ -478,7 +488,7 @@ export async function userDetail(req: Request, res: Response) {
       emailVerified: user.emailVerified,
       provider: user.provider,
       isBanned: user.isBanned,
-      isPremium: user.isPremium,
+      isPremium: premiumActive,
       isSuspended: !!user.suspendedUntil && user.suspendedUntil.getTime() > Date.now(),
       suspendedUntil: user.suspendedUntil,
       premiumPlan: planLabel,
@@ -503,7 +513,7 @@ export async function userDetail(req: Request, res: Response) {
       at: r.createdAt,
     })),
     billing: {
-      isPremium: user.isPremium,
+      isPremium: premiumActive,
       plan: planLabel,
       premiumUntil: user.premiumUntil,
     },
@@ -630,7 +640,12 @@ export async function grantPremium(req: Request, res: Response) {
     data: { isPremium: true, premiumPlan: plan, premiumUntil: until },
   });
   // Avisa o app do usuário em tempo real (esconde anúncios, atualiza VIP).
-  emitToUser(userId, "config:me", { isPremium: true });
+  // VIP dado pela equipe sempre tira banner e intersticial.
+  emitToUser(userId, "config:me", {
+    isPremium: true,
+    adFree: true,
+    premiumUntil: user.premiumUntil,
+  });
   res.json({ ok: true, premiumUntil: user.premiumUntil, plan });
 }
 
@@ -643,7 +658,7 @@ export async function revokePremium(req: Request, res: Response) {
     data: { isPremium: false, premiumPlan: null, premiumUntil: null },
   });
   // Avisa o app do usuário em tempo real.
-  emitToUser(userId, "config:me", { isPremium: false });
+  emitToUser(userId, "config:me", { isPremium: false, adFree: false });
   res.json({ ok: true });
 }
 
@@ -742,7 +757,7 @@ async function userSummary(userId: string) {
     isOnline: isRecentlyOnline(user.profile),
     isBanned: user.isBanned,
     isSuspended: !!user.suspendedUntil && user.suspendedUntil.getTime() > Date.now(),
-    isPremium: user.isPremium,
+    isPremium: isPremiumActive(user),
     createdAt: user.createdAt,
   };
 }
@@ -884,7 +899,7 @@ export async function listDeleteRequests(req: Request, res: Response) {
         fullName: user?.profile?.fullName ?? "(sem perfil)",
         profilePicture: user?.profile?.profilePicture ?? null,
         city: user?.profile?.city ?? null,
-        isPremium: user?.isPremium ?? false,
+        isPremium: user ? isPremiumActive(user) : false,
         userCreatedAt: user?.createdAt ?? null,
       };
     })
@@ -948,14 +963,15 @@ export async function broadcastNotification(req: Request, res: Response) {
     if (!userId) throw new AppError("userId é obrigatório para envio individual", 422);
     userIds = [userId];
   } else if (audience === "premium") {
+    // VIP ativo agora (painel ou anúncio); a flag sozinha fica ligada após vencer.
     const users = await prisma.user.findMany({
-      where: { OR: [{ isPremium: true }, { premiumUntil: { gt: now } }] },
+      where: premiumActiveWhere(now),
       select: { id: true },
     });
     userIds = users.map((u) => u.id);
   } else if (audience === "free") {
     const users = await prisma.user.findMany({
-      where: { isPremium: false, OR: [{ premiumUntil: null }, { premiumUntil: { lte: now } }] },
+      where: premiumInactiveWhere(now),
       select: { id: true },
     });
     userIds = users.map((u) => u.id);

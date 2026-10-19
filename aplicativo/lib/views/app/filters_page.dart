@@ -1,5 +1,9 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:mioamoreapp/services/app_api.dart';
 import 'package:mioamoreapp/views/app/app_theme.dart';
+import 'package:mioamoreapp/views/app/vip_offer.dart';
 
 /// Filtros da descoberta.
 class DiscoverFilters {
@@ -40,6 +44,14 @@ class DiscoverFilters {
     return q;
   }
 
+  /// Intenção e frequência à igreja são filtros VIP (o servidor recusa sem VIP).
+  bool get hasVipFilters => intention != null || churchFrequency != null;
+
+  void clearVipFilters() {
+    intention = null;
+    churchFrequency = null;
+  }
+
   DiscoverFilters copy() => DiscoverFilters(
         minAge: minAge,
         maxAge: maxAge,
@@ -55,7 +67,10 @@ class DiscoverFilters {
 
 class FiltersPage extends StatefulWidget {
   final DiscoverFilters filters;
-  const FiltersPage({super.key, required this.filters});
+
+  /// Sem VIP, os filtros VIP oferecem o VIP por anúncio em vez de marcar.
+  final bool isPremium;
+  const FiltersPage({super.key, required this.filters, this.isPremium = false});
 
   @override
   State<FiltersPage> createState() => _FiltersPageState();
@@ -63,6 +78,29 @@ class FiltersPage extends StatefulWidget {
 
 class _FiltersPageState extends State<FiltersPage> {
   late DiscoverFilters f = widget.filters.copy();
+  late bool _vip = widget.isPremium;
+
+  @override
+  void initState() {
+    super.initState();
+    // O estado recebido pode estar desatualizado (VIP ganho ou vencido agora).
+    unawaited(_refreshVip());
+  }
+
+  Future<void> _refreshVip() async {
+    try {
+      final stats = await AppApi.getStats();
+      if (mounted) setState(() => _vip = stats["isPremium"] == true);
+    } catch (_) {}
+  }
+
+  Future<void> _unlockVipFilters() async {
+    final vip = await offerVipByAd(
+      context,
+      reason: "Os filtros de intenção e frequência à igreja são recursos VIP.",
+    );
+    if (vip && mounted) setState(() => _vip = true);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -147,24 +185,29 @@ class _FiltersPageState extends State<FiltersPage> {
             for (final i in kInterests) _multiChip(i, f.interests),
           ]),
           const SizedBox(height: 22),
-          _title("Intenção  ⭐ VIP"),
+          _title(_vip ? "Intenção  ⭐ VIP" : "Intenção  🔒 VIP"),
           Wrap(spacing: 8, runSpacing: 8, children: [
             for (final it in kIntentions)
-              _singleChip(
-                  it, f.intention, (v) => setState(() => f.intention = v)),
+              _vipChip(it, f.intention, (v) => setState(() => f.intention = v)),
           ]),
           const SizedBox(height: 22),
-          _title("Frequência à igreja  ⭐ VIP"),
+          _title(_vip
+              ? "Frequência à igreja  ⭐ VIP"
+              : "Frequência à igreja  🔒 VIP"),
           Wrap(spacing: 8, runSpacing: 8, children: [
             for (final c in kChurchFrequency)
-              _singleChip(c, f.churchFrequency,
+              _vipChip(c, f.churchFrequency,
                   (v) => setState(() => f.churchFrequency = v)),
           ]),
           const SizedBox(height: 28),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: () => Navigator.pop(context, f),
+              onPressed: () {
+                // Sem VIP, filtros VIP que sobraram seriam recusados pelo servidor.
+                if (!_vip) f.clearVipFilters();
+                Navigator.pop(context, f);
+              },
               style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.gold,
                   foregroundColor: AppTheme.navy,
@@ -213,6 +256,17 @@ class _FiltersPageState extends State<FiltersPage> {
       label: label,
       selected: selected,
       onTap: () => onPick(selected ? null : label),
+    );
+  }
+
+  /// Filtro VIP: com VIP funciona como os outros; sem VIP oferece o anúncio.
+  Widget _vipChip(
+      String label, String? current, void Function(String?) onPick) {
+    if (_vip) return _singleChip(label, current, onPick);
+    return AppChoiceChip(
+      label: label,
+      selected: false,
+      onTap: () => unawaited(_unlockVipFilters()),
     );
   }
 }

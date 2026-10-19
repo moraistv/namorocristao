@@ -26,6 +26,8 @@ const _kinds = <String, _KindMeta>{
   "BOOSTS": _KindMeta(Icons.bolt_rounded, Color(0xFF8B5CF6), "Boost", "Boosts"),
   "CREDITS": _KindMeta(
       Icons.monetization_on_rounded, Color(0xFFE0A91B), "crédito", "créditos"),
+  "VIP": _KindMeta(Icons.workspace_premium, Color(0xFFD4AF37), "hora de VIP",
+      "horas de VIP"),
 };
 
 const _fallbackKind =
@@ -38,7 +40,10 @@ _KindMeta _metaOf(String? kind) => _kinds[kind] ?? _fallbackKind;
 class RewardsPage extends StatefulWidget {
   /// Frase opcional no topo (ex.: "Seus Super Likes acabaram").
   final String? highlight;
-  const RewardsPage({super.key, this.highlight});
+
+  /// Tipo de recompensa em destaque (ex.: "VIP"): aparece primeiro e marcado.
+  final String? focusKind;
+  const RewardsPage({super.key, this.highlight, this.focusKind});
 
   @override
   State<RewardsPage> createState() => _RewardsPageState();
@@ -53,6 +58,8 @@ class _RewardsPageState extends State<RewardsPage> {
   int _superLikes = 0;
   int _boosts = 0;
   int _credits = 0;
+  bool _isVip = false;
+  DateTime? _vipUntil;
   String? _busyId;
   int _loadGeneration = 0;
   Timer? _ticker;
@@ -98,6 +105,12 @@ class _RewardsPageState extends State<RewardsPage> {
       if (!mounted || generation != _loadGeneration) return;
       final overview = results[0];
       final stats = results[1];
+      // O evento do servidor pode se perder ao fechar o anúncio (o socket
+      // reconecta): os anúncios seguem o que o servidor diz agora.
+      AdsService.setPremium(
+        AdsService.adFreeFrom(stats),
+        until: DateTime.tryParse(stats["premiumUntil"]?.toString() ?? ""),
+      );
       final rewards = ((overview["rewards"] as List?) ?? [])
           .whereType<Map>()
           .map((item) => Map<String, dynamic>.from(item))
@@ -111,6 +124,9 @@ class _RewardsPageState extends State<RewardsPage> {
         _superLikes = (stats["superLikesLeft"] as num?)?.toInt() ?? 0;
         _boosts = (stats["boostsRemaining"] as num?)?.toInt() ?? 0;
         _credits = (stats["credits"] as num?)?.toInt() ?? 0;
+        _isVip = stats["isPremium"] == true;
+        _vipUntil = DateTime.tryParse(stats["premiumUntil"]?.toString() ?? "")
+            ?.toLocal();
         _cooldowns
           ..clear()
           ..addEntries([
@@ -329,6 +345,7 @@ class _RewardsPageState extends State<RewardsPage> {
         children: [
           if (widget.highlight != null && widget.highlight!.isNotEmpty)
             _highlightBanner(widget.highlight!),
+          if (_isVip) _vipStatus(),
           _balances(),
           const SizedBox(height: 16),
           if (!_enabled)
@@ -338,11 +355,20 @@ class _RewardsPageState extends State<RewardsPage> {
           else if (_rewards.isEmpty)
             _notice("Nenhuma recompensa disponível agora.")
           else ...[
+            if (widget.focusKind != null &&
+                !_rewards.any((r) => r["kind"] == widget.focusKind)) ...[
+              _notice(
+                widget.focusKind == "VIP"
+                    ? "O VIP por anúncio não está disponível agora."
+                    : "Esta recompensa não está disponível agora.",
+              ),
+              const SizedBox(height: 16),
+            ],
             const SectionTitle("Assista e ganhe"),
             const SizedBox(height: 4),
             _capLine(),
             const SizedBox(height: 8),
-            for (final reward in _rewards) _rewardCard(reward),
+            for (final reward in _orderedRewards()) _rewardCard(reward),
             const SizedBox(height: 4),
             const Text(
               "Os anúncios ajudam a manter o app gratuito. Os limites renovam todo dia.",
@@ -350,6 +376,49 @@ class _RewardsPageState extends State<RewardsPage> {
               style: TextStyle(color: AppTheme.textMuted, fontSize: 12),
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  /// Ofertas do tipo em destaque primeiro; o resto mantém a ordem do painel.
+  List<Map<String, dynamic>> _orderedRewards() {
+    final focus = widget.focusKind;
+    if (focus == null) return _rewards;
+    return [
+      ..._rewards.where((r) => r["kind"] == focus),
+      ..._rewards.where((r) => r["kind"] != focus),
+    ];
+  }
+
+  String _two(int value) => value.toString().padLeft(2, "0");
+
+  Widget _vipStatus() {
+    final until = _vipUntil;
+    final text = until == null
+        ? "Você é VIP."
+        : "Você é VIP até ${_two(until.day)}/${_two(until.month)} às ${_two(until.hour)}:${_two(until.minute)}.";
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppTheme.gold.withOpacity(0.14),
+        borderRadius: BorderRadius.circular(AppTheme.rMd),
+        border: Border.all(color: AppTheme.gold.withOpacity(0.4)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.workspace_premium, color: AppTheme.gold, size: 20),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                color: AppTheme.navy,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -498,11 +567,16 @@ class _RewardsPageState extends State<RewardsPage> {
     final blockedBy = reward["blockedBy"]?.toString();
     final cooldownLeft = _cooldowns[id] ?? 0;
     final busy = _busyId == id;
-    final locked = blockedBy == "LIMIT" || blockedBy == "DAILY_CAP";
+    final locked = blockedBy == "LIMIT" ||
+        blockedBy == "DAILY_CAP" ||
+        blockedBy == "ALREADY_VIP";
 
     String buttonLabel;
     if (busy) {
       buttonLabel = "Aguarde...";
+    } else if (blockedBy == "ALREADY_VIP") {
+      // VIP sem validade: não há horas a somar.
+      buttonLabel = "Você já é VIP";
     } else if (blockedBy == "LIMIT") {
       buttonLabel = "Volte amanhã";
     } else if (blockedBy == "DAILY_CAP") {
@@ -514,6 +588,8 @@ class _RewardsPageState extends State<RewardsPage> {
     }
     final canTap = !locked && cooldownLeft == 0 && _busyId == null;
     final description = reward["description"]?.toString() ?? "";
+    final focused =
+        widget.focusKind != null && reward["kind"] == widget.focusKind;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -521,7 +597,9 @@ class _RewardsPageState extends State<RewardsPage> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(AppTheme.rMd),
-        border: Border.all(color: AppTheme.border),
+        border: focused
+            ? Border.all(color: AppTheme.gold, width: 2)
+            : Border.all(color: AppTheme.border),
         boxShadow: AppTheme.softShadow,
       ),
       child: Column(

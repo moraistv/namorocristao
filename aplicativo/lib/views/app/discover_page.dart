@@ -97,6 +97,15 @@ class _DiscoverPageState extends State<DiscoverPage> {
       });
     } on AppApiException catch (error) {
       if (!mounted || generation != _loadGeneration) return;
+      if (error.code == "PREMIUM_ONLY" && _filters.hasVipFilters) {
+        // O VIP acabou com filtros VIP marcados: tira só esses e busca de novo.
+        setState(() => _filters.clearVipFilters());
+        _showSwipeError(
+            "Seu VIP acabou, então os filtros VIP foram desligados.");
+        unawaited(_loadStats());
+        unawaited(_load());
+        return;
+      }
       setState(() {
         _error = error.message;
         _loading = false;
@@ -199,7 +208,8 @@ class _DiscoverPageState extends State<DiscoverPage> {
   /// Usa o mesmo gate de saldo e recado para botão, gesto e perfil detalhado.
   Future<void> _trySuperLike() async {
     if (_swipeRequestInFlight) return;
-    if (!_isPremium && _superLikesLeft <= 0) {
+    // VIP também tem limite diário (maior); o saldo já inclui os extras.
+    if (_superLikesLeft <= 0) {
       if (AdsService.rewardedAvailable) {
         _openRewards(_superLikesOutText);
       } else {
@@ -352,7 +362,8 @@ class _DiscoverPageState extends State<DiscoverPage> {
                   final result = await Navigator.push<DiscoverFilters>(
                     context,
                     MaterialPageRoute(
-                        builder: (_) => FiltersPage(filters: _filters)),
+                        builder: (_) => FiltersPage(
+                            filters: _filters, isPremium: _isPremium)),
                   );
                   if (!mounted || result == null) return;
                   setState(() => _filters = result);
@@ -452,7 +463,7 @@ class _DiscoverPageState extends State<DiscoverPage> {
               border: Border.all(color: Colors.white, width: 1.5),
             ),
             child: Text(
-              _isPremium ? "∞" : "$_superLikesLeft",
+              "$_superLikesLeft",
               style: const TextStyle(
                   color: AppTheme.navy,
                   fontWeight: FontWeight.bold,

@@ -80,8 +80,27 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
     _isResumed = WidgetsBinding.instance.lifecycleState == null ||
         WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
     RealtimeBus.notifications.addListener(_onNotificationPreferenceChanged);
+    RealtimeBus.incognitoOff.addListener(_onIncognitoTurnedOff);
     if (_isResumed) _resumePresence();
     unawaited(_setup());
+  }
+
+  /// O VIP acabou e o servidor desligou o incógnito: a pessoa precisa saber
+  /// que voltou a aparecer na descoberta.
+  void _onIncognitoTurnedOff() {
+    if (!mounted || _isLoggingOut) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        backgroundColor: AppTheme.navy,
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 6),
+        content: Text(
+          "Seu VIP acabou e o modo incógnito foi desligado: você voltou a aparecer na descoberta.",
+          style: TextStyle(color: Colors.white),
+        ),
+      ),
+    );
+    RealtimeBus.accountChanged();
   }
 
   void _onNotificationPreferenceChanged() {
@@ -96,6 +115,9 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       case AppLifecycleState.resumed:
         _resumePresence();
         if (_socketStarted) _socket.reconnectWithLatestToken();
+        // Eventos do servidor podem ter se perdido em segundo plano (ex.: VIP
+        // ganho ao fechar o anúncio, enquanto o socket reconecta).
+        unawaited(AdsService.refreshPremium());
         if (TokenStorage.notificationsEnabled) {
           unawaited(_refreshPushRegistration());
         }
@@ -247,8 +269,11 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
       onConfigAds: AdsService.reload,
       onConfigStore: RealtimeBus.storeChanged,
       onConfigMe: (data) {
-        if (data.containsKey("isPremium")) {
-          AdsService.setPremium(data["isPremium"] == true);
+        if (data.containsKey("adFree") || data.containsKey("isPremium")) {
+          AdsService.setPremium(
+            AdsService.adFreeFrom(data),
+            until: DateTime.tryParse(data["premiumUntil"]?.toString() ?? ""),
+          );
         }
         if (data["banned"] == true ||
             data["suspended"] == true ||
@@ -656,6 +681,7 @@ class _MainShellState extends State<MainShell> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     RealtimeBus.notifications.removeListener(_onNotificationPreferenceChanged);
+    RealtimeBus.incognitoOff.removeListener(_onIncognitoTurnedOff);
     _isResumed = false;
     _presenceHeartbeat?.cancel();
     _presenceHeartbeat = null;

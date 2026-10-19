@@ -7,7 +7,7 @@ import {
 } from "@prisma/client";
 import { prisma } from "../../config/prisma";
 import { AppError } from "../../lib/errors";
-import { startOfToday } from "../../lib/premium";
+import { isAdFree, isPermanentPremium, startOfToday } from "../../lib/premium";
 import { retryBackoff } from "../../lib/retry";
 import { emitToUser } from "../../sockets";
 
@@ -25,6 +25,8 @@ const CLEANUP_EVERY_MS = 60 * 60 * 1000;
 
 type ClaimStatus = "PENDING" | "GRANTED" | "EXPIRED";
 type BlockReason = "LIMIT" | "DAILY_CAP" | "COOLDOWN";
+/** Ofertas de VIP ficam bloqueadas para quem já tem VIP sem validade. */
+type OfferBlock = BlockReason | "ALREADY_VIP";
 
 function transactionErrorCode(error: unknown): string | undefined {
   if (typeof error !== "object" || error === null || !("code" in error)) {
@@ -147,7 +149,7 @@ function usageWindowStart(dayStart: Date, nowMs: number): Date {
 export async function getRewardsOverview(userId: string) {
   const nowMs = Date.now();
   const dayStart = startOfToday();
-  const [ads, offers, grants] = await Promise.all([
+  const [ads, offers, grants, viewer] = await Promise.all([
     loadAdSettings(),
     prisma.adReward.findMany({
       where: { active: true },
@@ -161,10 +163,15 @@ export async function getRewardsOverview(userId: string) {
       },
       select: { rewardId: true, grantedAt: true },
     }),
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { isPremium: true, premiumUntil: true },
+    }),
   ]);
 
   const enabled = rewardsEnabled(ads);
   const usage = buildUsage(grants, dayStart);
+  const permanentVip = viewer ? isPermanentPremium(viewer) : false;
 
   return {
     enabled,
@@ -174,7 +181,12 @@ export async function getRewardsOverview(userId: string) {
       used: usage.totalToday,
     },
     rewards: offers.map((offer) => {
-      const state = evaluateOffer(offer, ads, usage, nowMs);
+      const evaluated = evaluateOffer(offer, ads, usage, nowMs);
+      const blockedBy: OfferBlock | null =
+        offer.kind === "VIP" && permanentVip
+          ? "ALREADY_VIP"
+          : evaluated.blockedBy;
+      const state = { ...evaluated, blockedBy };
       return {
         id: offer.id,
         kind: offer.kind,
@@ -257,6 +269,21 @@ export async function startRewardClaim(userId: string, rewardId: string) {
               "REWARD_NOT_FOUND"
             );
           }
+          if (offer.kind === "VIP") {
+            const viewer = await tx.user.findUnique({
+              where: { id: userId },
+              select: { isPremium: true, premiumUntil: true },
+            });
+            // VIP sem validade não tem horas a somar: o anúncio seria em vão.
+            if (viewer && isPermanentPremium(viewer)) {
+              throw new AppError(
+                "Você já é VIP sem prazo de validade.",
+                409,
+                undefined,
+                "ALREADY_VIP"
+              );
+            }
+          }
 
           const now = new Date();
           const dayStart = startOfToday();
@@ -326,17 +353,75 @@ export async function startRewardClaim(userId: string, rewardId: string) {
   throw conflict();
 }
 
-function rewardIncrement(
-  kind: RewardKind,
-  amount: number
-): Prisma.UserUpdateInput {
-  switch (kind) {
+const HOUR_MS = 60 * 60 * 1000;
+
+/** Efeito visível da recompensa, para avisar o app na hora. */
+interface RewardEffect {
+  vip?: { premiumUntil: Date | null; premiumPlan: string | null };
+}
+
+/**
+ * Soma horas de VIP: parte do fim do VIP atual (se ainda vale) ou de agora.
+ * VIP sem validade (flag sem data) fica como está. A gravação só acontece se a
+ * validade lida não mudou no meio do caminho (ex.: VIP dado pelo painel).
+ */
+async function extendVip(
+  tx: Prisma.TransactionClient,
+  userId: string,
+  hours: number,
+  now: Date
+): Promise<RewardEffect> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const user = await tx.user.findUniqueOrThrow({
+      where: { id: userId },
+      select: { isPremium: true, premiumUntil: true, premiumPlan: true },
+    });
+    if (isPermanentPremium(user)) {
+      return { vip: { premiumUntil: null, premiumPlan: user.premiumPlan } };
+    }
+    const active =
+      user.premiumUntil !== null && user.premiumUntil.getTime() > now.getTime();
+    const base = active ? user.premiumUntil!.getTime() : now.getTime();
+    const premiumUntil = new Date(base + hours * HOUR_MS);
+    // "ad" marca no painel que o VIP veio de anúncio (sem apagar o plano dado pela equipe).
+    const premiumPlan = active ? user.premiumPlan : "ad";
+    const updated = await tx.user.updateMany({
+      where: { id: userId, premiumUntil: user.premiumUntil },
+      data: { premiumUntil, premiumPlan },
+    });
+    if (updated.count === 1) return { vip: { premiumUntil, premiumPlan } };
+  }
+  throw new Error("Não foi possível somar as horas de VIP");
+}
+
+/** Credita a recompensa ao usuário, dentro da transação da concessão. */
+async function applyReward(
+  tx: Prisma.TransactionClient,
+  claim: Pick<AdRewardClaim, "userId" | "kind" | "amount">,
+  now: Date
+): Promise<RewardEffect> {
+  const where = { id: claim.userId };
+  switch (claim.kind) {
     case "SUPERLIKES":
-      return { bonusSuperLikes: { increment: amount } };
+      await tx.user.update({
+        where,
+        data: { bonusSuperLikes: { increment: claim.amount } },
+      });
+      return {};
     case "BOOSTS":
-      return { boostsRemaining: { increment: amount } };
+      await tx.user.update({
+        where,
+        data: { boostsRemaining: { increment: claim.amount } },
+      });
+      return {};
     case "CREDITS":
-      return { credits: { increment: amount } };
+      await tx.user.update({
+        where,
+        data: { credits: { increment: claim.amount } },
+      });
+      return {};
+    case "VIP":
+      return extendVip(tx, claim.userId, claim.amount, now);
   }
 }
 
@@ -373,18 +458,34 @@ export async function grantRewardClaim(
       const claim = await tx.adRewardClaim.findUniqueOrThrow({
         where: { id: claimId },
       });
-      await tx.user.update({
-        where: { id: claim.userId },
-        data: rewardIncrement(claim.kind, claim.amount),
-      });
-      return claim;
+      const effect = await applyReward(tx, claim, now);
+      return { claim, effect };
     });
 
     if (granted) {
-      emitToUser(granted.userId, "config:me", {
-        rewardGranted: { kind: granted.kind, amount: granted.amount },
+      const { claim, effect } = granted;
+      let vipState = {};
+      if (effect.vip) {
+        // VIP muda na hora as travas do app e, conforme o painel, os anúncios.
+        const ads = await loadAdSettings();
+        vipState = {
+          isPremium: true,
+          premiumUntil: effect.vip.premiumUntil,
+          adFree: isAdFree(
+            {
+              isPremium: true,
+              premiumUntil: effect.vip.premiumUntil,
+              premiumPlan: effect.vip.premiumPlan,
+            },
+            ads.rewardsVipHidesAds
+          ),
+        };
+      }
+      emitToUser(claim.userId, "config:me", {
+        rewardGranted: { kind: claim.kind, amount: claim.amount },
+        ...vipState,
       });
-      return { result: "granted", claim: granted };
+      return { result: "granted", claim };
     }
   } catch (error) {
     // transaction_id já usado em outro resgate: replay do callback.
@@ -510,6 +611,7 @@ export async function getRewardStats() {
       SUPERLIKES: byKind("SUPERLIKES"),
       BOOSTS: byKind("BOOSTS"),
       CREDITS: byKind("CREDITS"),
+      VIP: byKind("VIP"),
     },
     grantedWeek: week,
     grantedTotal: total,

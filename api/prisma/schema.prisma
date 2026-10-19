@@ -95,6 +95,7 @@ enum RewardKind {
   SUPERLIKES
   BOOSTS
   CREDITS
+  VIP // horas de VIP (ver quem curtiu, filtros VIP, incógnito, Rewind, sem anúncios)
 }
 
 enum RewardClaimStatus {
@@ -505,6 +506,7 @@ model AdSettings {
   rewardsSsvAdUnit     String? // ad_unit esperado no callback SSV; vazio = não confere, mas é obrigatório para exigir o SSV. Zerado quando o bloco Premiado muda
   rewardsSsvLastAt     DateTime? // último callback SSV aceito (assinado pelo Google e ligado a um resgate nosso). Zerado quando o bloco Premiado muda
   rewardsSsvLastAdUnit String? // ad_unit desse último callback aceito
+  rewardsVipHidesAds   Boolean   @default(false) // VIP ganho por anúncio também esconde banner e intersticial
 
   updatedAt DateTime @updatedAt
 
@@ -517,7 +519,7 @@ model AdReward {
   kind         RewardKind
   title        String
   description  String?
-  amount       Int        @default(1) // unidades concedidas por anúncio assistido
+  amount       Int        @default(1) // unidades concedidas por anúncio assistido (VIP: horas)
   dailyLimit   Int        @default(5) // anúncios por usuário/dia (0 = sem limite)
   cooldownSecs Int        @default(0) // espera entre dois anúncios desta oferta
   active       Boolean    @default(true)

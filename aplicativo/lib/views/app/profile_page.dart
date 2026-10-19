@@ -544,6 +544,9 @@ class _ProfilePageState extends State<ProfilePage> {
         label = "${left.inDays}d restantes";
       } else if (left.inHours >= 1) {
         label = "${left.inHours}h restantes";
+      } else if (left.inMinutes >= 1) {
+        // VIP por anúncio dura horas: mostra os minutos no fim.
+        label = "${left.inMinutes} min restantes";
       } else {
         label = "Expira em breve";
       }

@@ -4,6 +4,8 @@ import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:mioamoreapp/config/config.dart';
 import 'package:mioamoreapp/services/app_api.dart';
+import 'package:mioamoreapp/services/realtime_bus.dart';
+import 'package:mioamoreapp/services/token_storage.dart';
 
 /// IDs de TESTE oficiais do Google (Android) — usados como fallback.
 class TestAdUnits {
@@ -30,8 +32,15 @@ class AdsService {
   static bool testMode = true;
   static String bannerPosition = "bottom";
 
-  /// Assinantes VIP não veem anúncios.
+  /// Usuário sem banner e intersticial: VIP dado pela equipe, ou VIP por
+  /// anúncio quando o painel liga essa opção (o servidor decide: `adFree`).
   static bool isPremiumUser = false;
+
+  /// `adFree` do servidor; respostas antigas só têm `isPremium`.
+  static bool adFreeFrom(Map<String, dynamic> data) =>
+      data.containsKey("adFree")
+          ? data["adFree"] == true
+          : data["isPremium"] == true;
 
   /// Só exibe anúncios se estiverem ligados E o usuário não for VIP.
   static bool get shouldShowAds => enabled && !isPremiumUser;
@@ -41,11 +50,59 @@ class AdsService {
   static final ValueNotifier<int> revision = ValueNotifier<int>(0);
   static void _bump() => revision.value++;
 
+  static Timer? _premiumCheck;
+
   /// Marca/desmarca VIP e reflete imediatamente (esconde/mostra anúncios).
-  static void setPremium(bool value) {
+  /// Com validade, confere de novo no servidor quando ela vencer: o VIP por
+  /// anúncio dura poucas horas e os anúncios precisam voltar sozinhos.
+  static void setPremium(bool value, {DateTime? until}) {
+    _schedulePremiumCheck(value ? until : null);
     if (isPremiumUser == value) return;
     isPremiumUser = value;
     _bump();
+  }
+
+  static void _schedulePremiumCheck(DateTime? until) {
+    _premiumCheck?.cancel();
+    _premiumCheck = null;
+    if (until == null) return;
+    final left = until.difference(DateTime.now());
+    // Folga de 2s para o servidor já considerar o VIP vencido. Se o relógio do
+    // aparelho já passou do fim mas o servidor ainda diz VIP (relógio
+    // adiantado), espera 30s entre as conferências em vez de repetir na hora.
+    _premiumCheck = Timer(
+      left > Duration.zero
+          ? left + const Duration(seconds: 2)
+          : const Duration(seconds: 30),
+      () => unawaited(refreshPremium()),
+    );
+  }
+
+  /// Confere no servidor se o usuário está sem anúncios (fim do VIP, volta do
+  /// app para a frente, evento perdido) e reagenda a próxima conferência.
+  static Future<void> refreshPremium() async {
+    if (!TokenStorage.isLoggedIn) {
+      setPremium(false);
+      return;
+    }
+    try {
+      final stats = await AppApi.getStats();
+      final adFree = adFreeFrom(stats);
+      final changed = adFree != isPremiumUser;
+      setPremium(
+        adFree,
+        until: DateTime.tryParse(stats["premiumUntil"]?.toString() ?? ""),
+      );
+      // Curtidas, perfil e descoberta recarregam com o VIP atual.
+      if (changed) RealtimeBus.accountChanged();
+    } catch (_) {
+      // Sem rede agora: tenta de novo em 1 minuto.
+      _premiumCheck?.cancel();
+      _premiumCheck = Timer(
+        const Duration(minutes: 1),
+        () => unawaited(refreshPremium()),
+      );
+    }
   }
 
   /// Recarrega a config do servidor (force) e notifica os widgets.
@@ -107,10 +164,13 @@ class AdsService {
     if (_loaded && !force) return;
     final firstLoad = !_loaded;
     try {
-      // Status VIP: assinantes não veem anúncios.
+      // Sem anúncios para o VIP da equipe (e, se o painel quiser, o por anúncio).
       try {
         final stats = await AppApi.getStats();
-        isPremiumUser = stats["isPremium"] == true;
+        setPremium(
+          adFreeFrom(stats),
+          until: DateTime.tryParse(stats["premiumUntil"]?.toString() ?? ""),
+        );
       } catch (_) {}
       final cfg = await AppApi.getAdsConfig();
       enabled = cfg["enabled"] == true;
